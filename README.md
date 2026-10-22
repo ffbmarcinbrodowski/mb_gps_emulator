@@ -9,6 +9,8 @@ Built to test GPS tracking servers, alarms and notifications without real hardwa
 
 **Stack:** Python + Flask · SQLite · vanilla JavaScript + Bootstrap 5 · Leaflet + OpenStreetMap · Docker
 
+![Main window: devices driving along their routes](docs/screenshots/main.jpg)
+
 ## Features
 
 - **Devices:** add, edit and delete virtual trackers (name, IMEI, route, send interval, average speed, target server).
@@ -19,6 +21,17 @@ Built to test GPS tracking servers, alarms and notifications without real hardwa
 - **Servers:** manage a list of target servers (host + port).
 - **Protocol:** real Teltonika Codec 8 over TCP, with IMEI handshake, CRC-16 and record acknowledgement. The encoder is verified byte-for-byte against the example in the Teltonika wiki.
 - **Fake server:** a small built-in test server prints every decoded record, so you can try the emulator without Traccar.
+
+## Screenshots
+
+| Add a device: click start and end on the map | Send an event from a running device |
+|---|---|
+| ![Add device dialog with a generated route](docs/screenshots/add-device.jpg) | ![Event menu](docs/screenshots/events.jpg) |
+
+<p align="center">
+  <img src="docs/screenshots/iphone.jpg" alt="Emulator on an iPhone" width="300"><br>
+  <em>On an iPhone</em>
+</p>
 
 ## Quick start (Docker)
 
