@@ -13,3 +13,6 @@ graphhopper_api.txt
 *.tmp
 *.jpg
 promt.txt
+desktop/
+requirements-desktop.txt
+docs/

@@ -8,9 +8,7 @@ Routes are generated with GraphHopper; if that fails a straight line is used.
 """
 import sys
 
-import database
-import models
-from emulator import graphhopper
+from core import database, graphhopper, models
 
 SERVERS = [
     {"name": "Local Traccar", "host": "127.0.0.1", "port": 5027},
@@ -20,11 +18,11 @@ SERVERS = [
 
 DEVICES = [
     {"name": "Teltonika001", "imei": "356307042441001", "start": [49.2043, 6.9472], "end": [49.2425, 7.0445],
-     "interval_s": 5, "speed_kmh": 50},
+     "interval_s": 5, "speed_kmh": 130},
     {"name": "Teltonika002", "imei": "356307042441002", "start": [49.2766, 7.0365], "end": [49.2152, 7.0390],
-     "interval_s": 5, "speed_kmh": 40},
+     "interval_s": 5, "speed_kmh": 110},
     {"name": "Teltonika003", "imei": "356307042441003", "start": [49.2790, 7.1150], "end": [49.2160, 7.1080],
-     "interval_s": 10, "speed_kmh": 70},
+     "interval_s": 10, "speed_kmh": 90},   # e.g. a truck
 ]
 
 

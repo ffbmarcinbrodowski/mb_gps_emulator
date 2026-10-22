@@ -1,3 +1,4 @@
 Flask>=3.0
 requests>=2.31
 gunicorn>=22.0   # production server used in Docker
+tzdata          # time zones for scenarios (Windows and slim Docker images have none)

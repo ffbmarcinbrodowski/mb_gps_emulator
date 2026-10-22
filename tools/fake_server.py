@@ -14,8 +14,8 @@ import sys
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from emulator.events import name_for  # noqa: E402
-from emulator.teltonika import decode_avl_packet  # noqa: E402
+from core.events import name_for  # noqa: E402
+from core.teltonika import decode_avl_packet  # noqa: E402
 
 
 class Handler(socketserver.BaseRequestHandler):
@@ -47,7 +47,10 @@ class Handler(socketserver.BaseRequestHandler):
                     print(f"    {imei} {ts}  {r['lat']:.6f},{r['lon']:.6f}  "
                           f"{r['speed_kmh']:>3} km/h  {r['angle']:>3}°  alt {r['altitude']} m  io {r['io']}")
                     if r["event_io_id"]:
-                        name = name_for(r["event_io_id"], r["io"].get(r["event_io_id"]))
+                        if r["event_io_id"] == 239:
+                            name = "Ignition " + ("on" if r["io"].get(239) else "off")
+                        else:
+                            name = name_for(r["event_io_id"], r["io"].get(r["event_io_id"]))
                         print(f"    >>> EVENT: {name or 'unknown'} (IO {r['event_io_id']}, priority {r['priority']})")
                 self.request.sendall(struct.pack(">I", len(records)))
         except (ConnectionError, OSError):

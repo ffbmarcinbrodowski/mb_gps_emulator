@@ -1,0 +1,3 @@
+PySide6>=6.6    # Qt for Python (includes QtWebEngine for the map)
+requests>=2.31
+tzdata          # time zones for scenarios (Windows has none built in)

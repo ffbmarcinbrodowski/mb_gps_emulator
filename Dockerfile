@@ -18,4 +18,4 @@ EXPOSE 5057
 # process, so a second worker would run a second, independent emulator.
 # Threads handle concurrent API requests instead.
 CMD ["gunicorn", "--workers", "1", "--threads", "16", "--bind", "0.0.0.0:5057", \
-     "--access-logfile", "-", "app:app"]
+     "--access-logfile", "-", "web.app:app"]
