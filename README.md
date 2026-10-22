@@ -14,7 +14,7 @@ It comes with two interfaces on top of the same core:
 
 **Stack:** Python · Flask (web) · PySide6/Qt (desktop) · SQLite · vanilla JavaScript + Bootstrap 5 · Leaflet + OpenStreetMap · Docker
 
-![Main window: devices driving along their routes](docs/screenshots/main.jpg)
+![Main window: devices driving along their routes, a scenario device parked until its next departure](docs/screenshots/main.jpg)
 
 ## Features
 
@@ -46,6 +46,8 @@ It comes with two interfaces on top of the same core:
 | Add a device: click start and end on the map | Send an event from a running device |
 |---|---|
 | ![Add device dialog with a generated route](docs/screenshots/add-device.jpg) | ![Event menu](docs/screenshots/events.jpg) |
+| **Scenario: drive on a schedule** | **History: weeks of past data in seconds** |
+| ![Scenario dialog with the next departures](docs/screenshots/scenario.jpg) | ![History dialog](docs/screenshots/history.jpg) |
 
 <p align="center">
   <img src="docs/screenshots/iphone.jpg" alt="Emulator on an iPhone" width="300"><br>
@@ -224,7 +226,7 @@ python -m desktop
 
 | Add / edit a device | |
 |---|---|
-| ![Desktop device dialog](docs/screenshots/desktop-device.jpg) | Click the map for the start and end point. The route is generated in the background and the markers can be dragged. |
+| ![Desktop device dialog](docs/screenshots/desktop-device.jpg) | Click the map for the start and end point. The route is generated in the background and the markers can be dragged. The scenario is edited in its own dialog (**Edit…**). |
 
 ## Running the web app without Docker
 
