@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 from core import database, models, services
 
 from .map_view import MapView
-from .scenario_widget import ScenarioWidget
+from .scenario_widget import ScenarioDialog, summary
 from .tasks import error_text, run_async
 
 HINT = "Click the map to set the start, then the end point."
@@ -44,11 +44,12 @@ class DeviceDialog(QDialog):
         self.end = None
         self.preview = None      # route generated in this dialog
         self.saved_duration_s = 0  # duration of the saved route (edit), for the scenario preview
+        self.scenario = None       # scenario saved with the device (None = manual)
         self._route_request = 0  # ignores answers to outdated route requests
         self._alive = True       # background results may arrive after the dialog closed
 
         self.setWindowTitle("Edit device" if device_id else "New device")
-        self.resize(1200, 720)
+        self.resize(1150, 680)
         self._build_ui()
         self._load_servers()
         if device_id:
@@ -104,9 +105,15 @@ class DeviceDialog(QDialog):
         form.addRow("", self.realistic)
 
         form.addRow(self._section("Scenario"))
-        self.scenario = ScenarioWidget()
-        self.scenario.changed.connect(self._update_scenario_preview)
-        form.addRow(self.scenario)
+        # Edited in its own dialog, so this dialog keeps its size.
+        self.scenario_label = QLabel(summary(None))
+        self.scenario_label.setWordWrap(True)
+        scenario_btn = QPushButton("Edit…")
+        scenario_btn.clicked.connect(self._edit_scenario)
+        scenario_row = QHBoxLayout()
+        scenario_row.addWidget(self.scenario_label, 1)
+        scenario_row.addWidget(scenario_btn)
+        form.addRow(scenario_row)
 
         form.addRow(self._section("Server"))
         self.server = QComboBox()
@@ -134,7 +141,7 @@ class DeviceDialog(QDialog):
         left_scroll.setWidgetResizable(True)
         left_scroll.setFrameShape(QFrame.NoFrame)
         left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        left_scroll.setFixedWidth(460)
+        left_scroll.setFixedWidth(400)
 
         self.map = MapView(self)
         self.map.clicked.connect(self._map_clicked)
@@ -202,7 +209,7 @@ class DeviceDialog(QDialog):
         self.speed.setValue(d["speed_kmh"])
         self.realistic.setChecked(d["realistic"])
         self._load_servers(d["server_id"])
-        self.scenario.load(d["scenario"])
+        self._set_scenario(d["scenario"])
         if d["route"]:
             self.saved_duration_s = d["route"]["duration_s"]
             self.start, self.end = d["route"]["start"], d["route"]["end"]
@@ -277,20 +284,18 @@ class DeviceDialog(QDialog):
         self.map.show_route(route["points"])
         minutes = round(route["duration_s"] / 60)
         self.route_info.setText(f"{route['distance_m'] / 1000:.1f} km · ~{minutes} min by car")
-        self._update_scenario_preview()   # warnings depend on how long one trip takes
 
     # --- Scenario ------------------------------------------------------------------------
 
-    def _update_scenario_preview(self):
-        """Upcoming departures, calculated by the same code as the emulator (fast, no network)."""
+    def _set_scenario(self, scenario):
+        self.scenario = scenario
+        self.scenario_label.setText(summary(scenario))
+
+    def _edit_scenario(self):
         duration = (self.preview or {}).get("duration_s") or self.saved_duration_s
-        try:
-            result = services.scenario_preview(
-                {"scenario": self.scenario.value(), "duration_s": duration, "device_id": self.device_id})
-        except services.ServiceError as err:
-            self.scenario.show_preview(error=err.message)
-            return
-        self.scenario.show_preview(result)
+        dialog = ScenarioDialog(self, self.scenario, duration, self.device_id)
+        if dialog.exec() == QDialog.Accepted:
+            self._set_scenario(dialog.scenario)
 
     # --- Save --------------------------------------------------------------------------
 
@@ -317,7 +322,7 @@ class DeviceDialog(QDialog):
             "interval_s": self.interval.value(),
             "speed_kmh": self.speed.value(),
             "realistic": self.realistic.isChecked(),
-            "scenario": self.scenario.value(),
+            "scenario": self.scenario,
             "server_id": self.server.currentData(),
             "start": self.start,
             "end": self.end,
@@ -352,7 +357,7 @@ class DeviceDialog(QDialog):
         if keep_open:
             self.name.clear()
             self.imei.clear()
-            self.scenario.load(None)
+            self._set_scenario(None)
             self._reset_points()
             self.name.setFocus()
         else:

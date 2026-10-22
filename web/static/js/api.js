@@ -29,6 +29,11 @@ export const api = {
     update: (id, data) => request('PUT', `/api/servers/${id}`, data),
     remove: (id) => request('DELETE', `/api/servers/${id}`),
   },
+  history: {
+    start: (deviceId, days) => request('POST', '/api/history', { device_id: deviceId, days }),
+    status: (deviceId) => request('GET', `/api/history/${deviceId}`),
+    cancel: (deviceId) => request('POST', `/api/history/${deviceId}/cancel`),
+  },
   scenarios: {
     preview: (scenario, durationS, deviceId) => request('POST', '/api/scenarios/preview',
       { scenario, duration_s: durationS, device_id: deviceId }),

@@ -24,6 +24,9 @@ It comes with two interfaces on top of the same core:
 - **Scenarios:** let devices drive on a schedule, day after day, e.g. twice a day to work and back,
   every hour there and back, or back and forth all day. Between trips they stand parked with the
   ignition off.
+- **History:** generate weeks or months of past data from a scenario in seconds. The records have
+  realistic past timestamps and are sent like a tracker emptying its buffer, so you get a dataset
+  for analytics right away.
 - **Realistic data:** devices drive like real vehicles, so the data in Traccar can be used for analytics:
   - speeds follow the road (GraphHopper speed limits and road classes), with smooth acceleration and braking,
   - slower in curves and stops at traffic lights and junctions,
@@ -112,8 +115,8 @@ allowed use.
      (e.g. 130 for a car, 80 for a truck) and the server, then click **Save**.
    - **Realistic driving** is on by default. Switch it off for a simple constant-speed drive,
      which is handy for quick protocol tests.
-   - **Scenario:** *Manual* drives the route once. Choose a scenario to drive on a schedule
-     (see [Scenarios](#scenarios)). The dialog shows the next departures.
+   - **Scenario:** *Manual* drives the route once. Click **Edit…** next to *Scenario* to drive on a
+     schedule instead (see [Scenarios](#scenarios)). The scenario window shows the next departures.
 3. Click **Start** on a device, or **Start all**.
 4. **Events:** select a running device and use **Event ▾** in the map header.
 
@@ -148,6 +151,30 @@ and drives at the planned times until you click **Stop**.
   either, the computer's zone is used.
 - **Skipped departures:** a departure is skipped if the vehicle is still driving at that time.
   The preview warns when trips are longer than the gaps between departures.
+
+## History
+
+Analytics projects need weeks or months of data. **History** (map header in the web app, toolbar
+in the desktop app) generates it from the device's scenario without waiting:
+
+1. Give the device a scenario (e.g. *Fixed times* `07:30, 16:30`, Mon–Fri) and stop it.
+2. Click **History**, choose how many days back (1–90) and click **Generate**.
+
+- **Same models as live:** the scenario is simulated in virtual time with the same trips, traffic
+  stops, idling, parking heartbeats, GPS noise and IO elements as live emulation.
+- **Real timestamps:** every record gets the time it "happened", e.g. 07:31 three weeks ago. Only
+  the upload is fast: records are sent in batches of 100, oldest first, like a tracker that was
+  offline and empties its buffer.
+- **Size and speed:** 90 days of a twice-a-day commute are about 72,000 records and take seconds.
+  An hourly shuttle produces about a million records. Records are streamed, so memory use stays
+  small. The upload speed depends on the server.
+- **Reproducible:** the same device and period give the same history.
+- **Continuity:** the device's odometer continues from where the history ended, and the device
+  stands where the history left it.
+- **Use a device with no data for that period** (e.g. a new IMEI). Otherwise old and generated
+  tracks overlap.
+- **Traccar** stores the records by their fix time, so reports (Trips, Stops, Summary) and
+  analytics see them as normal history. The *server time* of each position is the upload time.
 
 ## Connecting to Traccar
 
@@ -290,6 +317,9 @@ server → device : [4B number of accepted records]
 | GET | `/api/emulator/status` | IDs of running devices |
 | POST | `/api/scenarios/preview` | `{scenario: {...}, duration_s: 1290}` → next departures + warnings |
 | GET | `/api/settings` | `{timezone}` |
+| POST | `/api/history` | `{device_id: 1, days: 7}` → start generating history |
+| GET | `/api/history/<device_id>` | `{state, progress, sent, period, error}` |
+| POST | `/api/history/<device_id>/cancel` | stop generating |
 
 ## Project structure
 
@@ -307,6 +337,7 @@ core/                 shared core, no UI code
   motion.py           realistic driving: speed profile, acceleration, curves, stops, GPS noise
   recorder.py         when a record is saved (Teltonika FMB data acquisition)
   scenarios.py        schedules: next departure, where the vehicle stands, preview
+  history.py          past data: scenario simulated in virtual time, sent in batches
   events.py           event catalog (crash, towing, …)
   imei.py             valid test IMEIs for new devices
   engine.py           one thread per device: drive / park, records, offline buffer

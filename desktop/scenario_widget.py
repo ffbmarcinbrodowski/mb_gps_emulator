@@ -1,10 +1,14 @@
 """
-"Scenario" section of the device dialog: when the device drives (see core/scenarios.py).
+Scenario of a device: when it drives (see core/scenarios.py).
+ScenarioWidget holds the fields, ScenarioDialog shows them in their own window.
 """
 from PySide6.QtCore import QTime, QTimer, Signal
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QSpinBox, QTimeEdit, QWidget,
+    QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QSpinBox,
+    QTimeEdit, QVBoxLayout, QWidget,
 )
+
+from core import services
 
 DAYS = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
 TYPES = [
@@ -137,3 +141,66 @@ class ScenarioWidget(QWidget):
         lines += [f"{t['at']} &nbsp; {t['legs']}" for t in result["trips"]]
         lines += [f"<span style='color:#b8860b'>⚠ {w}</span>" for w in result["warnings"]]
         self.preview.setText("<br>".join(lines))
+
+
+def summary(scenario):
+    """One-line description, e.g. 'Fixed times 07:30, 16:30 · Mo-Fr'."""
+    if not scenario:
+        return "Manual – drive once"
+    days = scenario["days"]
+    day_text = "daily" if len(days) == 7 else "Mo-Fr" if days == [0, 1, 2, 3, 4] else " ".join(DAYS[d] for d in days)
+    if scenario["type"] == "times":
+        times = scenario["times"] if isinstance(scenario["times"], str) else ", ".join(scenario["times"])
+        return f"Fixed times {times} · {day_text}"
+    if scenario["type"] == "interval":
+        trip = " round trip" if scenario.get("round_trip") else ""
+        return f"Every {scenario['every_min']} min {scenario['from']}–{scenario['to']}{trip} · {day_text}"
+    return f"Back and forth {scenario['from']}–{scenario['to']} · {day_text}"
+
+
+class ScenarioDialog(QDialog):
+    """Edits a scenario; the device dialog keeps the result until the device is saved."""
+
+    def __init__(self, parent, scenario, duration_s, device_id):
+        super().__init__(parent)
+        self.setWindowTitle("Scenario")
+        self.resize(520, 420)
+        self.duration_s = duration_s
+        self.device_id = device_id
+        self.scenario = scenario
+
+        intro = QLabel("When the device drives. Times are local times of the app's time zone.")
+        intro.setStyleSheet("color: #666;")
+        self.widget = ScenarioWidget()
+        self.widget.load(scenario)
+        self.widget.changed.connect(self._update_preview)
+        buttons = QDialogButtonBox(QDialogButtonBox.Apply | QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Apply).clicked.connect(self._apply)
+        buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(intro)
+        layout.addWidget(self.widget)
+        layout.addStretch()
+        layout.addWidget(buttons)
+        self._update_preview()
+
+    def _preview(self):
+        """Validates the scenario and returns the preview (raises ServiceError)."""
+        return services.scenario_preview(
+            {"scenario": self.widget.value(), "duration_s": self.duration_s, "device_id": self.device_id})
+
+    def _update_preview(self):
+        try:
+            self.widget.show_preview(self._preview())
+        except services.ServiceError as err:
+            self.widget.show_preview(error=err.message)
+
+    def _apply(self):
+        try:
+            self._preview()
+        except services.ServiceError as err:
+            self.widget.show_preview(error=err.message)
+            return
+        self.scenario = services.parse_scenario(self.widget.value())
+        self.accept()

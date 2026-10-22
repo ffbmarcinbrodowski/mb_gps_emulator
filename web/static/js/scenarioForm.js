@@ -1,7 +1,8 @@
-// "Scenario" section of the device dialog: when the device drives (see core/scenarios.py).
+// Scenario of a device (see core/scenarios.py): a one-line summary in the device dialog,
+// edited in its own "Scenario" modal so the device dialog keeps its size.
 
 import { api } from './api.js';
-import { esc } from './ui.js';
+import { esc, scenarioText } from './ui.js';
 
 const $ = (id) => document.getElementById(id);
 const DAYS = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'];
@@ -10,7 +11,10 @@ const DEFAULTS = {
   round_trip: true, dwell_min: 5, jitter_min: 5, days: [0, 1, 2, 3, 4],
 };
 
-export function initScenarioForm({ durationS, deviceId }) {
+export function initScenarioForm({ deviceModal, durationS, deviceId }) {
+  const modal = new bootstrap.Modal($('scenarioModal'));
+  let current = null;   // scenario saved with the device (null = manual)
+
   // Day toggle buttons (Bootstrap "btn-check")
   $('scDays').innerHTML = DAYS.map((d, i) => `
     <input type="checkbox" class="btn-check" id="scDay${i}" autocomplete="off">
@@ -21,11 +25,49 @@ export function initScenarioForm({ durationS, deviceId }) {
     clearTimeout(previewTimer);
     previewTimer = setTimeout(preview, 300);
   };
-
   $('scType').addEventListener('change', () => { showFields(); schedulePreview(); });
   for (const el of $('scFields').querySelectorAll('input')) {
     el.addEventListener('change', schedulePreview);
   }
+
+  // ---- Summary in the device dialog -----------------------------------------
+
+  function showSummary() {
+    $('scSummary').textContent = current ? scenarioText(current) : 'Manual – drive once';
+  }
+
+  function load(scenario) {
+    current = scenario || null;
+    showSummary();
+  }
+
+  // ---- Scenario modal ----------------------------------------------------------
+  // Bootstrap can't show two modals at once: the device dialog hides while this one is open
+  // and comes back (with its form and map untouched) when this one closes.
+
+  $('btnScenario').addEventListener('click', () => {
+    fillFields(current);
+    $('deviceModal').addEventListener('hidden.bs.modal', () => modal.show(), { once: true });
+    deviceModal.hide();
+  });
+  $('scenarioModal').addEventListener('hidden.bs.modal', () => deviceModal.show());
+  $('btnScenarioCancel').addEventListener('click', () => modal.hide());
+
+  $('btnScenarioApply').addEventListener('click', async () => {
+    let scenario = readFields();
+    if (scenario) {
+      try {
+        // The server validates and normalizes it (e.g. "7:30,16:30" -> ["07:30", "16:30"]).
+        scenario = (await api.scenarios.preview(scenario, durationS(), deviceId())).scenario;
+      } catch (err) {
+        $('scPreview').innerHTML = `<div class="text-danger">${esc(err.message)}</div>`;
+        return;
+      }
+    }
+    current = scenario;
+    showSummary();
+    modal.hide();
+  });
 
   function showFields() {
     const type = $('scType').value;
@@ -35,7 +77,7 @@ export function initScenarioForm({ durationS, deviceId }) {
     }
   }
 
-  function load(scenario) {
+  function fillFields(scenario) {
     const s = { ...DEFAULTS, ...(scenario || {}) };
     $('scType').value = scenario ? scenario.type : '';
     $('scTimes').value = Array.isArray(s.times) ? s.times.join(', ') : s.times;
@@ -51,7 +93,7 @@ export function initScenarioForm({ durationS, deviceId }) {
   }
 
   // The scenario as sent to the API (null = manual).
-  function value() {
+  function readFields() {
     const type = $('scType').value;
     if (!type) return null;
     const scenario = {
@@ -74,7 +116,7 @@ export function initScenarioForm({ durationS, deviceId }) {
 
   // Upcoming departures + warnings, calculated by the server (same code as the emulator).
   async function preview() {
-    const scenario = value();
+    const scenario = readFields();
     const el = $('scPreview');
     if (!scenario) {
       el.innerHTML = '';
@@ -91,5 +133,5 @@ export function initScenarioForm({ durationS, deviceId }) {
     }
   }
 
-  return { load, value, preview, reset: () => load(null) };
+  return { load, value: () => current, reset: () => load(null) };
 }

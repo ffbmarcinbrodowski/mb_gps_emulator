@@ -2,6 +2,7 @@
 
 import { api } from './api.js';
 import { initDeviceForm } from './deviceForm.js';
+import { initHistory } from './history.js';
 import { createMap, deviceIcon, endpointMarker, routeLine } from './map.js';
 import { initServers } from './servers.js';
 import { STATUS_BADGE, esc, fmtCoord, fmtKm, scenarioText, toast } from './ui.js';
@@ -27,6 +28,7 @@ const deviceForm = initDeviceForm({
   },
 });
 initServers({ onChanged: refresh });
+const historyDialog = initHistory({ onFinished: refresh });
 
 // ---- Data loading -----------------------------------------------------------
 
@@ -165,6 +167,8 @@ async function renderSelected(fit = false) {
     : '';
   // Events need an open connection, so only a running device can send them.
   $('btnEvent').disabled = d?.status !== 'running';
+  // History follows the scenario and must not mix with live data.
+  $('btnHistory').disabled = !d?.scenario || d.status === 'running';
 
   // The route geometry is only fetched when the selection or the route changes.
   const key = d?.route ? `${d.id}:${d.route.id}` : null;
@@ -254,6 +258,11 @@ $('eventMenu').addEventListener('click', async (e) => {
     toast(err.message);
   }
   refresh();
+});
+
+$('btnHistory').addEventListener('click', () => {
+  const d = state.devices.find((x) => x.id === state.selectedId);
+  if (d) historyDialog.open(d);
 });
 
 // ---- Start ------------------------------------------------------------------

@@ -9,8 +9,15 @@ When does the tracker save a record? Modelled on Teltonika FMB "data acquisition
     and an event record (event IO 239) every time the ignition changes.
 
 Like core/motion.py it does not read the clock - the caller passes the time.
+
+RecordBuilder turns a fix into an AVL record (IO elements, voltage, GSM signal).
 """
-from .teltonika import IO_IGNITION
+import random
+
+from .teltonika import (
+    AvlRecord, IO_EXTERNAL_VOLTAGE, IO_GNSS_STATUS, IO_GSM_SIGNAL, IO_HDOP, IO_IGNITION, IO_MOVEMENT,
+    IO_PDOP, IO_TOTAL_ODOMETER, IO_TRIP_ODOMETER,
+)
 
 
 class RecordPolicy:
@@ -47,3 +54,57 @@ class RecordPolicy:
 
     def saved(self, fix, now):
         self.last = (now, fix)
+
+
+class RecordBuilder:
+    """
+    Turns a GPS fix + vehicle state into a Teltonika AVL record with the IO elements
+    a real FMB sends. Used by the live engine and by the history generator, so both
+    produce exactly the same kind of data.
+    """
+
+    def __init__(self, realistic=True, rng=None):
+        self.realistic = realistic
+        self.rng = rng or random.Random()
+        self.gsm = 5     # GSM signal 0-5, changes slowly
+
+    def build(self, fix, timestamp_ms, odometer_m, trip_odometer_m, event=None, event_io_id=0):
+        e = event or {}
+        ignition = e.get("ignition", int(fix["ignition"]))
+        speed = e.get("speed", fix["speed_kmh"])
+        if self.realistic and self.rng.random() < 0.05:
+            self.gsm = min(5, max(2, self.gsm + self.rng.choice((-1, 1))))
+
+        record = AvlRecord(
+            timestamp_ms=timestamp_ms,
+            lat=fix["lat"], lon=fix["lon"], altitude=fix["altitude"],
+            angle=fix["heading"], speed_kmh=speed, satellites=fix["satellites"],
+            priority=e.get("priority", 1 if event_io_id else 0),
+            event_io_id=e.get("io_id", event_io_id),
+            io_1b={
+                IO_IGNITION: ignition,
+                IO_MOVEMENT: e.get("movement", int(fix["moving"])),
+                IO_GNSS_STATUS: 1,
+                IO_GSM_SIGNAL: self.gsm,
+            },
+            io_2b={
+                IO_EXTERNAL_VOLTAGE: e.get("external_voltage", self._voltage_mv(ignition)),
+                IO_PDOP: round(fix["pdop"] * 10),
+                IO_HDOP: round(fix["hdop"] * 10),
+            },
+            io_4b={
+                IO_TOTAL_ODOMETER: int(odometer_m),
+                IO_TRIP_ODOMETER: int(trip_odometer_m),
+            },
+        )
+        if event:
+            # Overspeed (IO 255) carries the speed itself, the others their fixed value.
+            record.io_1b[event["io_id"]] = round(speed) if event["value"] is None else event["value"]
+        return record
+
+    def _voltage_mv(self, ignition):
+        """Car battery: ~14 V while the engine runs (alternator), ~12.5 V when off."""
+        if not self.realistic:
+            return 12_600
+        base = 14_050 if ignition else 12_500
+        return int(base + self.rng.gauss(0, 50))

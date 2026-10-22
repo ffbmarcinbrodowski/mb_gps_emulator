@@ -47,7 +47,7 @@ export function scenarioText(sc) {
   if (!sc) return 'manual';
   const days = sc.days.length === 7 ? 'daily'
     : sc.days.join(',') === '0,1,2,3,4' ? 'Mo-Fr' : sc.days.map((d) => DAY_NAMES[d]).join(' ');
-  if (sc.type === 'times') return `${sc.times.join(', ')} · ${days}`;
+  if (sc.type === 'times') return `${[].concat(sc.times).join(', ')} · ${days}`;
   if (sc.type === 'interval') {
     return `every ${sc.every_min} min ${sc.from}-${sc.to}${sc.round_trip ? ' round trip' : ''} · ${days}`;
   }

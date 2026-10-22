@@ -23,6 +23,7 @@ export function initDeviceForm({ onSaved }) {
     savedDurationS: 0,  // duration of the saved route (edit), used by the scenario preview
   };
   const scenario = initScenarioForm({
+    deviceModal: modal,
     durationS: () => state.preview?.duration_s ?? state.savedDurationS,
     deviceId: () => state.editingId,
   });
@@ -94,7 +95,6 @@ export function initDeviceForm({ onSaved }) {
       state.preview = route;
       drawLine(route.points);
       setRouteInfo(`${fmtKm(route.distance_m)} · ~${fmtDuration(route.duration_s)} by car`);
-      scenario.preview();   // warnings depend on how long one trip takes
     } catch (err) {
       state.preview = null;
       drawLine(null);

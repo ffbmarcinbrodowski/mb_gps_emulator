@@ -1,9 +1,9 @@
 # Keep secrets, data and local stuff out of the image
 .venv/
-__pycache__/
-*.pyc
+**/__pycache__
+**/*.pyc
 .git/
-.DS_Store
+**/.DS_Store
 backup/
 data/
 emulator.db*

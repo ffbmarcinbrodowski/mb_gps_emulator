@@ -42,6 +42,10 @@
       <div class="panel-header d-flex align-items-center flex-wrap gap-2">
         <span class="me-auto text-truncate" id="mapTitle">Device: –</span>
         <span id="mapInfo" class="small opacity-75"></span>
+        <button class="btn btn-sm btn-light" id="btnHistory" disabled
+                title="Generate past data from the device's scenario (device must be stopped)">
+          <i class="bi bi-clock-history"></i> History
+        </button>
         <!-- Send an event (crash, towing, ...) from the selected running device -->
         <div class="dropdown">
           <button class="btn btn-sm btn-light dropdown-toggle" id="btnEvent" data-bs-toggle="dropdown"
@@ -116,55 +120,11 @@
             </div>
 
             <h3 class="h6 text-secondary mt-4 mb-2">Scenario</h3>
-            <select class="form-select form-select-sm mb-2" id="scType">
-              <option value="">Manual – drive once (Start / Stop)</option>
-              <option value="times">Fixed times – e.g. to work and back</option>
-              <option value="interval">Every N minutes</option>
-              <option value="loop">Back and forth continuously</option>
-            </select>
-            <div id="scFields" class="d-none">
-              <div class="form-row-label sc-times">
-                <label for="scTimes">Departures</label>
-                <input class="form-control form-control-sm" id="scTimes" placeholder="07:30, 16:30">
-              </div>
-              <div class="form-row-label sc-interval">
-                <label for="scEvery">Every</label>
-                <div class="input-group input-group-sm">
-                  <input type="number" class="form-control" id="scEvery" min="5" max="1440">
-                  <span class="input-group-text">min</span>
-                </div>
-              </div>
-              <div class="form-row-label sc-interval sc-loop">
-                <label for="scFrom">Active</label>
-                <div class="input-group input-group-sm">
-                  <input type="time" class="form-control" id="scFrom">
-                  <span class="input-group-text">–</span>
-                  <input type="time" class="form-control" id="scTo">
-                </div>
-              </div>
-              <div class="form-check ms-1 mb-2 sc-interval">
-                <input class="form-check-input" type="checkbox" id="scRoundTrip">
-                <label class="form-check-label" for="scRoundTrip">Round trip (A → B, wait, back to A)</label>
-              </div>
-              <div class="form-row-label sc-interval sc-loop">
-                <label for="scDwell">Wait at end</label>
-                <div class="input-group input-group-sm">
-                  <input type="number" class="form-control" id="scDwell" min="0" max="720">
-                  <span class="input-group-text">min</span>
-                </div>
-              </div>
-              <div class="form-row-label">
-                <label>Days</label>
-                <div class="d-flex flex-wrap gap-1" id="scDays"></div>
-              </div>
-              <div class="form-row-label sc-times sc-interval">
-                <label for="scJitter">Random ±</label>
-                <div class="input-group input-group-sm">
-                  <input type="number" class="form-control" id="scJitter" min="0" max="60">
-                  <span class="input-group-text">min</span>
-                </div>
-              </div>
-              <div class="small ms-1" id="scPreview"></div>
+            <div class="d-flex align-items-center gap-2 ms-1">
+              <span class="small flex-grow-1" id="scSummary">Manual – drive once</span>
+              <button type="button" class="btn btn-sm btn-outline-secondary" id="btnScenario">
+                <i class="bi bi-calendar-week"></i> Edit…
+              </button>
             </div>
 
             <h3 class="h6 text-secondary mt-4 mb-2">Server</h3>
@@ -238,6 +198,116 @@
           Traccar listens for Teltonika devices on port <strong>5027</strong> by default.
           Each device's IMEI must also be added as a device in Traccar.
         </p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Scenario modal (opened from the device dialog) ===== -->
+<div class="modal fade" id="scenarioModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static">
+  <div class="modal-dialog modal-dialog-centered modal-fullscreen-sm-down">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title h5 text-secondary">Scenario</h2>
+      </div>
+      <div class="modal-body">
+        <p class="small text-secondary mb-2">When the device drives. Times are local times of the app's time zone.</p>
+        <select class="form-select form-select-sm mb-2" id="scType">
+          <option value="">Manual – drive once (Start / Stop)</option>
+          <option value="times">Fixed times – e.g. to work and back</option>
+          <option value="interval">Every N minutes</option>
+          <option value="loop">Back and forth continuously</option>
+        </select>
+        <div id="scFields" class="d-none">
+          <div class="form-row-label sc-times">
+            <label for="scTimes">Departures</label>
+            <input class="form-control form-control-sm" id="scTimes" placeholder="07:30, 16:30">
+          </div>
+          <div class="form-row-label sc-interval">
+            <label for="scEvery">Every</label>
+            <div class="input-group input-group-sm">
+              <input type="number" class="form-control" id="scEvery" min="5" max="1440">
+              <span class="input-group-text">min</span>
+            </div>
+          </div>
+          <div class="form-row-label sc-interval sc-loop">
+            <label for="scFrom">Active</label>
+            <div class="input-group input-group-sm">
+              <input type="time" class="form-control" id="scFrom">
+              <span class="input-group-text">–</span>
+              <input type="time" class="form-control" id="scTo">
+            </div>
+          </div>
+          <div class="form-check ms-1 mb-2 sc-interval">
+            <input class="form-check-input" type="checkbox" id="scRoundTrip">
+            <label class="form-check-label" for="scRoundTrip">Round trip (A → B, wait, back to A)</label>
+          </div>
+          <div class="form-row-label sc-interval sc-loop">
+            <label for="scDwell">Wait at end</label>
+            <div class="input-group input-group-sm">
+              <input type="number" class="form-control" id="scDwell" min="0" max="720">
+              <span class="input-group-text">min</span>
+            </div>
+          </div>
+          <div class="form-row-label">
+            <label>Days</label>
+            <div class="d-flex flex-wrap gap-1" id="scDays"></div>
+          </div>
+          <div class="form-row-label sc-times sc-interval">
+            <label for="scJitter">Random ±</label>
+            <div class="input-group input-group-sm">
+              <input type="number" class="form-control" id="scJitter" min="0" max="60">
+              <span class="input-group-text">min</span>
+            </div>
+          </div>
+          <div class="small ms-1" id="scPreview"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" id="btnScenarioCancel">Cancel</button>
+        <button type="button" class="btn btn-primary" id="btnScenarioApply">Apply</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== History modal ===== -->
+<div class="modal fade" id="historyModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-fullscreen-sm-down">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title h5 text-secondary" id="historyTitle">Generate history</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="small text-secondary">
+          Simulates the device's scenario in the past: the same trips, traffic stops, parking and GPS
+          noise as live emulation. The records are sent with their real past timestamps, like a tracker
+          that empties its buffer.
+        </p>
+        <div class="small mb-3" id="historyScenario"></div>
+        <div class="form-row-label">
+          <label for="historyDays">Days back</label>
+          <div class="input-group input-group-sm">
+            <input type="number" class="form-control" id="historyDays" min="1" max="90" value="7">
+            <span class="input-group-text">days, until now</span>
+          </div>
+        </div>
+        <div class="alert alert-warning small py-2 mt-2 mb-0">
+          Use it for a device that has no data in Traccar for this period (e.g. a new IMEI),
+          otherwise the tracks overlap.
+        </div>
+        <div class="mt-3 d-none" id="historyProgressBox">
+          <div class="progress" role="progressbar">
+            <div class="progress-bar progress-bar-striped progress-bar-animated" id="historyProgress" style="width:0%"></div>
+          </div>
+          <div class="small mt-1" id="historyStatus"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+        <button type="button" class="btn btn-outline-danger d-none" id="btnHistoryCancel">Cancel generation</button>
+        <button type="button" class="btn btn-primary" id="btnHistoryStart">Generate</button>
       </div>
     </div>
   </div>

@@ -132,6 +132,27 @@ def routes_get(route_id):
     return jsonify(route)
 
 
+# --- History ----------------------------------------------------------------
+
+@app.post("/api/history")
+def history_start():
+    """Body: {"device_id": 1, "days": 7} - generate past data for a scenario device."""
+    data = request.get_json(force=True)
+    return jsonify(services.start_history(get_db(), emulator, services.parse_id(data, "device_id"),
+                                          data.get("days")))
+
+
+@app.get("/api/history/<int:device_id>")
+def history_status(device_id):
+    return jsonify(emulator.history_status(device_id) or {"state": None})
+
+
+@app.post("/api/history/<int:device_id>/cancel")
+def history_cancel(device_id):
+    emulator.cancel_history(device_id)
+    return jsonify({"ok": True})
+
+
 # --- Scenarios / settings --------------------------------------------------
 
 @app.post("/api/scenarios/preview")
@@ -159,6 +180,8 @@ def emulator_start():
         device_id = services.parse_id(data, "device_id")
         if models.get_device(db, device_id, include_points=False) is None:
             raise services.ServiceError("Device not found", 404)
+        if emulator.history_running(device_id):
+            raise services.ServiceError("History is being generated for this device - wait or cancel it", 409)
         started = [device_id] if emulator.start(device_id) else []
     return jsonify({"started": started})
 

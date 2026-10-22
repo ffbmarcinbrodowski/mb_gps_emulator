@@ -20,6 +20,7 @@ from core.engine import Emulator
 from . import settings
 from .device_dialog import DeviceDialog
 from .device_table import COL_PROGRESS, DeviceTableModel, ProgressDelegate
+from .history_dialog import HistoryDialog
 from .icons import BRAND, app_icon
 from .map_view import MapView
 from .servers_dialog import ServersDialog
@@ -146,6 +147,8 @@ class MainWindow(QMainWindow):
         self.act_delete = self._action("Delete", self.delete_device, QKeySequence.Delete, "Delete the selected device")
         self.act_start = self._action("Start", self.start_device, "Ctrl+R", "Start the selected device")
         self.act_stop = self._action("Stop", self.stop_device, "Ctrl+.", "Stop the selected device")
+        self.act_history = self._action("History…", self.open_history, "Ctrl+H",
+                                        "Generate past data from the device's scenario")
         self.act_start_all = self._action("Start all", self.start_all, "Ctrl+Shift+R")
         self.act_stop_all = self._action("Stop all", self.stop_all, "Ctrl+Shift+.")
         self.act_servers = self._action("Servers…", self.open_servers)
@@ -166,7 +169,8 @@ class MainWindow(QMainWindow):
         toolbar.setMovable(False)
         toolbar.setToolButtonStyle(Qt.ToolButtonTextOnly)
         add_items(toolbar, [self.act_add, self.act_edit, self.act_delete, None,
-                            self.act_start, self.act_stop, None, self.act_start_all, self.act_stop_all, None])
+                            self.act_start, self.act_stop, None, self.act_start_all, self.act_stop_all, None,
+                            self.act_history])
         self.event_button = QToolButton()
         self.event_button.setText("Event")
         self.event_button.setMenu(self.event_menu)
@@ -183,7 +187,7 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self.act_quit)
         devices_menu = menu.addMenu("Devices")
         add_items(devices_menu, [self.act_add, self.act_edit, self.act_delete, None, self.act_start, self.act_stop,
-                                 None, self.act_start_all, self.act_stop_all, None])
+                                 None, self.act_start_all, self.act_stop_all, None, self.act_history, None])
         devices_menu.addMenu(self.event_menu)
         menu.addMenu("Servers").addAction(self.act_servers)
         help_menu = menu.addMenu("Help")
@@ -301,6 +305,8 @@ class MainWindow(QMainWindow):
         self.act_stop.setEnabled(running)
         self.event_menu.setEnabled(running)
         self.event_button.setEnabled(running)
+        # History follows the scenario and must not mix with live data.
+        self.act_history.setEnabled(bool(d) and bool(d["scenario"]) and not running)
         running_count = sum(1 for x in self.model.devices if x["status"] == "running")
         self.statusBar().showMessage(f"{len(self.model.devices)} devices · {running_count} running")
 
@@ -358,8 +364,9 @@ class MainWindow(QMainWindow):
         run_async(task, self._after_background_change)
 
     def start_device(self):
-        if self.selected_id:
-            self.emulator.start(self.selected_id)
+        if self.selected_id and not self.emulator.start(self.selected_id) \
+                and self.emulator.history_running(self.selected_id):
+            QMessageBox.information(self, "Start", "History is being generated for this device - wait or cancel it.")
 
     def stop_device(self):
         if self.selected_id:
@@ -385,6 +392,12 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"{label} sent from {d['name']}", 5000)
         else:
             QMessageBox.information(self, "Event", "Start the device first - events need an open connection.")
+
+    def open_history(self):
+        d = self._selected()
+        if d:
+            HistoryDialog(self, self.db, self.emulator, d).exec()
+            self.reload_all()
 
     def open_servers(self):
         dialog = ServersDialog(self, self.db)

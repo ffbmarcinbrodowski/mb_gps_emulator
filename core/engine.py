@@ -31,13 +31,10 @@ from zoneinfo import ZoneInfo
 
 from . import config, database, geo, scenarios
 from .events import EVENTS
+from .history import HistoryJob
 from .motion import GpsReceiver, Parked, Trip
-from .recorder import RecordPolicy
+from .recorder import RecordBuilder, RecordPolicy
 from .tcp_client import TeltonikaClient
-from .teltonika import (
-    AvlRecord, IO_EXTERNAL_VOLTAGE, IO_GNSS_STATUS, IO_GSM_SIGNAL, IO_HDOP, IO_IGNITION, IO_MOVEMENT,
-    IO_PDOP, IO_TOTAL_ODOMETER, IO_TRIP_ODOMETER,
-)
 
 TICK_S = 1.0              # simulation step
 SEND_BATCH = 50           # records per packet when sending the buffer
@@ -92,7 +89,7 @@ class DeviceWorker(threading.Thread):
         self.policy = RecordPolicy(max(1, device["interval_s"]), self.realistic)
         self.odometer = device["odometer_m"]
         self.trip_start_odometer = self.odometer
-        self.gsm = 5
+        self.builder = RecordBuilder(self.realistic, self.rng)
 
         self.client = TeltonikaClient(server["host"], server["port"], device["imei"], config.TCP_TIMEOUT_S)
         self._update(status="running", last_error=None)
@@ -237,7 +234,8 @@ class DeviceWorker(threading.Thread):
 
     def _record(self, event=None, event_io_id=0):
         """Save a record (like the tracker does), send the buffer, store the live state."""
-        self.buffer.append(self._make_record(event, event_io_id))
+        self.buffer.append(self.builder.build(
+            self.fix, geo.now_ms(), self.odometer, self.odometer - self.trip_start_odometer, event, event_io_id))
         del self.buffer[:-MAX_BUFFER]
         self.policy.saved(self.fix, time.monotonic())
         error = self._flush()
@@ -265,47 +263,6 @@ class DeviceWorker(threading.Thread):
                 return f"{type(exc).__name__}: {exc} ({len(self.buffer)} records buffered)"
             del self.buffer[:len(batch)]
         return None
-
-    def _make_record(self, event=None, event_io_id=0):
-        fix, e = self.fix, event or {}
-        ignition = e.get("ignition", int(fix["ignition"]))
-        speed = e.get("speed", fix["speed_kmh"])
-        if self.trip.realistic and self.rng.random() < 0.05:
-            self.gsm = min(5, max(2, self.gsm + self.rng.choice((-1, 1))))
-
-        record = AvlRecord(
-            timestamp_ms=geo.now_ms(),
-            lat=fix["lat"], lon=fix["lon"], altitude=fix["altitude"],
-            angle=fix["heading"], speed_kmh=speed, satellites=fix["satellites"],
-            priority=e.get("priority", 1 if event_io_id else 0),
-            event_io_id=e.get("io_id", event_io_id),
-            io_1b={
-                IO_IGNITION: ignition,
-                IO_MOVEMENT: e.get("movement", int(fix["moving"])),
-                IO_GNSS_STATUS: 1,
-                IO_GSM_SIGNAL: self.gsm,
-            },
-            io_2b={
-                IO_EXTERNAL_VOLTAGE: e.get("external_voltage", self._voltage_mv(ignition)),
-                IO_PDOP: round(fix["pdop"] * 10),
-                IO_HDOP: round(fix["hdop"] * 10),
-            },
-            io_4b={
-                IO_TOTAL_ODOMETER: int(self.odometer),
-                IO_TRIP_ODOMETER: int(self.odometer - self.trip_start_odometer),
-            },
-        )
-        if event:
-            # Overspeed (IO 255) carries the speed itself, the others their fixed value.
-            record.io_1b[event["io_id"]] = round(speed) if event["value"] is None else event["value"]
-        return record
-
-    def _voltage_mv(self, ignition):
-        """Car battery: ~14 V while the engine runs (alternator), ~12.5 V when off."""
-        if not self.trip.realistic:
-            return 12_600
-        base = 14_050 if ignition else 12_500
-        return int(base + self.rng.gauss(0, 50))
 
     # --- Events --------------------------------------------------------------
 
@@ -370,6 +327,7 @@ class Emulator:
     def __init__(self, on_change=None):
         self.on_change = on_change
         self.workers = {}
+        self.history = {}          # device id -> HistoryJob (generating past data)
         self.lock = threading.Lock()
 
     def is_running(self, device_id):
@@ -377,6 +335,8 @@ class Emulator:
         return worker is not None and worker.is_alive() and not worker.stop_event.is_set()
 
     def start(self, device_id):
+        if self.history_running(device_id):
+            return False   # live data and generated history must not mix
         with self.lock:
             old = self.workers.get(device_id)
             if old is not None and old.is_alive():
@@ -410,6 +370,27 @@ class Emulator:
             db.executemany("UPDATE devices SET scenario_enabled = 0 WHERE id = ?", [(d,) for d in device_ids])
             db.commit()
             db.close()
+
+    # --- History ----------------------------------------------------------------
+
+    def history_running(self, device_id):
+        job = self.history.get(device_id)
+        return job is not None and job.is_alive()
+
+    def start_history(self, device_id, days):
+        job = HistoryJob(device_id, days)
+        self.history[device_id] = job
+        job.start()
+
+    def history_status(self, device_id):
+        """Status dict of the last history job of this device (None if there was none)."""
+        job = self.history.get(device_id)
+        return job.status() if job else None
+
+    def cancel_history(self, device_id):
+        job = self.history.get(device_id)
+        if job:
+            job.cancel()
 
     def trigger(self, device_id, event_type):
         """Queue an event for a running device. Returns False if it is not running."""

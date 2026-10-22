@@ -9,7 +9,7 @@ import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from . import config, graphhopper, models, scenarios
+from . import config, graphhopper, history, models, scenarios
 from .imei import generate_imei
 
 
@@ -131,12 +131,13 @@ def scenario_preview(data):
     """Upcoming departures of a scenario for the UI (data: {scenario, duration_s})."""
     cfg = parse_scenario(data.get("scenario"))
     if cfg is None:
-        return {"timezone": config.TIMEZONE, "trips": [], "warnings": []}
+        return {"timezone": config.TIMEZONE, "scenario": None, "trips": [], "warnings": []}
     now = datetime.now(ZoneInfo(config.TIMEZONE))
     leg_s = scenarios.leg_seconds(float(data.get("duration_s") or 0))
     trips, warnings = scenarios.preview(cfg, now, leg_s, seed=data.get("device_id") or 0)
     return {
         "timezone": config.TIMEZONE,
+        "scenario": cfg,   # validated and normalized (e.g. times as a sorted list)
         "trips": [{"at": f"{scenarios.DAY_NAMES[t.weekday()]} {t:%d.%m. %H:%M}", "legs": legs} for t, legs in trips],
         "warnings": warnings,
     }
@@ -250,6 +251,25 @@ def new_imei(db):
     """A valid, unused test IMEI for a new device (see core/imei.py)."""
     taken = {row["imei"] for row in db.execute("SELECT imei FROM devices")}
     return generate_imei(taken)
+
+
+def start_history(db, emulator, device_id, days):
+    """Generate `days` of past data for a scenario device (see core/history.py)."""
+    device = models.get_device(db, device_id, include_points=False)
+    if device is None:
+        raise ServiceError("Device not found", 404)
+    if not device["scenario"]:
+        raise ServiceError("History follows the device's scenario - choose a scenario first "
+                           "(e.g. Fixed times 07:30, 16:30).")
+    if not device["route"] or not device["server"]:
+        raise ServiceError("The device needs a route and a server")
+    if emulator.is_running(device_id):
+        raise ServiceError("Stop the device first - live data and history must not mix.", 409)
+    if emulator.history_running(device_id):
+        raise ServiceError("History is already being generated for this device", 409)
+    days = _number({"days": days}, "days", 1, history.MAX_DAYS, int)
+    emulator.start_history(device_id, days)
+    return emulator.history_status(device_id)
 
 
 def armed_device_ids(db):
