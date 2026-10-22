@@ -1,0 +1,26 @@
+# Teltonika GPS emulator - deployment in the local network.
+#
+#   docker compose up -d --build     ->  http://<host-ip>:5057
+#
+# GraphHopper key: in .env (see .env.example).
+# Data: ./data/emulator.db (copy an existing emulator.db there to keep your devices).
+
+services:
+  emulator:
+    build: .
+    container_name: gps-emulator
+    restart: unless-stopped
+    ports:
+      - "5057:5057"
+    env_file: .env
+    volumes:
+      - ./data:/data
+    extra_hosts:
+      # lets the emulator reach a Traccar running directly on the Docker host
+      # (use "host.docker.internal" as server host in the emulator)
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5057/api/servers', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

@@ -1,0 +1,15 @@
+# Keep secrets, data and local stuff out of the image
+.venv/
+__pycache__/
+*.pyc
+.git/
+.DS_Store
+backup/
+data/
+emulator.db*
+graphhopper_api.txt
+.env
+*.ai
+*.tmp
+*.jpg
+promt.txt

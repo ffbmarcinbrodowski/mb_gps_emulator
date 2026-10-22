@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+emulator.db*
+graphhopper_api.txt
+.DS_Store
+backup/
+data/
+.env
+# local design files / notes (not part of the published project)
+*.ai
+~ai-*.tmp
+promt.txt
+emulator_main.jpg
+emulator_add_device.jpg
