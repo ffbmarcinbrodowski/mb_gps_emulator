@@ -67,7 +67,7 @@ class DeviceTableModel(QAbstractTableModel):
             return f"{d['server']['host']}:{d['server']['port']}" if d["server"] else "no server"
         if col == 5:
             # "2026-10-22 16:54:24" -> "Crash 16:54:24"
-            return f"{d['last_event']} {d['last_event_at'][11:]}" if d["last_event"] else ""
+            return f"{d['last_event']} {d['last_event_local']}" if d["last_event"] else ""
         if col == COL_ERROR:
             return d["last_error"] or ""
         return None

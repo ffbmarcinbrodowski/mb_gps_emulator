@@ -4,6 +4,24 @@ Data access for the three tables: servers, devices, routes.
 Plain SQL + small functions that turn rows into JSON-friendly dicts.
 """
 import json
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
+from . import config
+
+
+def local_time(utc_text):
+    """
+    '2026-10-22 21:15:00' (UTC, as stored) -> '23:15:00' in the app time zone,
+    with the date in front when it is not today: '21.10. 07:31:12'.
+    """
+    if not utc_text:
+        return None
+    tz = ZoneInfo(config.TIMEZONE)
+    moment = datetime.strptime(utc_text, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc).astimezone(tz)
+    if moment.date() == datetime.now(tz).date():
+        return f"{moment:%H:%M:%S}"
+    return f"{moment:%d.%m. %H:%M:%S}"
 
 
 # --- Servers ----------------------------------------------------------------
@@ -159,10 +177,12 @@ def device_to_dict(db, row, include_points=False):
             "lat": row["current_lat"], "lon": row["current_lon"],
             "speed": row["current_speed"], "bearing": row["current_bearing"],
         } if row["current_lat"] is not None else None,
-        "last_sent_at": row["last_sent_at"],
+        "last_sent_at": row["last_sent_at"],              # UTC, as stored
+        "last_sent_local": local_time(row["last_sent_at"]),  # for display (app time zone)
         "last_error": row["last_error"],
         "last_event": row["last_event"],
         "last_event_at": row["last_event_at"],
+        "last_event_local": local_time(row["last_event_at"]),
         "route": route,
     }
 

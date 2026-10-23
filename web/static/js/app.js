@@ -93,7 +93,7 @@ function deviceCard(d) {
         ${d.activity === 'driving' ? ` · driving ${d.direction === 'return' ? 'B → A' : 'A → B'}` : ''}
         ${d.next_trip_at ? ` · next ${esc(d.next_trip_at)}` : ''}</div>` : ''}
       ${d.last_event ? `<div class="meta text-warning-emphasis">
-        <i class="bi bi-lightning-charge"></i> Last event: ${esc(d.last_event)} · ${esc(d.last_event_at)} UTC</div>` : ''}
+        <i class="bi bi-lightning-charge"></i> Last event: ${esc(d.last_event)} · ${esc(d.last_event_local)}</div>` : ''}
       ${d.last_error ? `<div class="meta text-danger text-break">${esc(d.last_error)}</div>` : ''}
     </div>`;
 }
@@ -163,7 +163,7 @@ async function renderSelected(fit = false) {
   $('mapTitle').textContent = d ? `Device: ${d.name}` : 'Device: –';
   $('mapInfo').textContent = d
     ? `${d.display_status}${d.current?.speed ? ` · ${Math.round(d.current.speed)} km/h` : ''} · ${d.progress_pct}%`
-      + (d.last_sent_at ? ` · last sent ${d.last_sent_at} UTC` : '')
+      + (d.last_sent_local ? ` · last sent ${d.last_sent_local}` : '')
     : '';
   // Events need an open connection, so only a running device can send them.
   $('btnEvent').disabled = d?.status !== 'running';

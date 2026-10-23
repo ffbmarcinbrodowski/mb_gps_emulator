@@ -276,8 +276,8 @@ class MainWindow(QMainWindow):
             info += f" · {d['progress_pct']:.1f}%"
             if d["display_status"] == "parked" and d["next_trip_at"]:
                 info += f" · next {d['next_trip_at']}"
-            if d["last_sent_at"]:
-                info += f" · last sent {d['last_sent_at'][11:]} UTC"
+            if d["last_sent_local"]:
+                info += f" · last sent {d['last_sent_local']}"
             self.map_info.setText(info)
         else:
             self.map_info.setText("")
