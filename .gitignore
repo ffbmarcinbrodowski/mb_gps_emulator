@@ -13,3 +13,6 @@ data/
 promt.txt
 emulator_main.jpg
 emulator_add_device.jpg
+
+# local presentation (video, voiceover) - never published
+presentation/
