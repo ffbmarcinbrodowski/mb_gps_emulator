@@ -183,6 +183,19 @@ def device_to_dict(db, row, include_points=False):
         "last_event": row["last_event"],
         "last_event_at": row["last_event_at"],
         "last_event_local": local_time(row["last_event_at"]),
+        "codec": row["codec"],
+        "obd": {
+            "enabled": bool(row["obd_enabled"]),
+            "vin": row["vin"] or "",
+            "odometer_km": row["obd_odometer_km"],
+            "service_km": row["obd_service_km"],       # below 0 = overdue (the device sends 0)
+            "fuel_pct": row["obd_fuel_pct"],
+            "tank_l": row["obd_tank_l"],
+            "dtcs": [c for c in row["obd_dtcs"].split(",") if c],
+            "mil_km": row["obd_mil_km"],
+            "coolant_c": row["obd_coolant_c"],
+            "weak_battery": bool(row["obd_weak_battery"]),
+        },
         "route": route,
     }
 
@@ -209,6 +222,8 @@ def create_device(db, data):
         (data["name"], data["imei"], data["server_id"], data["interval_s"], data["speed_kmh"],
          int(data.get("realistic", True)), _scenario_json(data)),
     )
+    if data.get("obd"):
+        save_obd(db, cur.lastrowid, data["obd"])
     return cur.lastrowid
 
 
@@ -218,6 +233,22 @@ def update_device(db, device_id, data):
         " scenario = ?, updated_at = datetime('now') WHERE id = ?",
         (data["name"], data["imei"], data["server_id"], data["interval_s"], data["speed_kmh"],
          int(data["realistic"]), _scenario_json(data), device_id),
+    )
+    # OBD values are only written when they were edited: a running device keeps changing them,
+    # and an old copy from the dialog must not turn the mileage back.
+    if data.get("obd"):
+        save_obd(db, device_id, data["obd"])
+
+
+def save_obd(db, device_id, obd):
+    """Codec + OBD settings of a device (validated by services.parse_obd)."""
+    db.execute(
+        "UPDATE devices SET codec = ?, obd_enabled = ?, vin = ?, obd_odometer_km = ?, obd_service_km = ?,"
+        " obd_fuel_pct = ?, obd_tank_l = ?, obd_dtcs = ?, obd_weak_battery = ?,"
+        " obd_mil_km = CASE WHEN ? = '' THEN 0 ELSE obd_mil_km END WHERE id = ?",
+        (obd["codec"], int(obd["enabled"]), obd["vin"] or None, obd["odometer_km"], obd["service_km"],
+         obd["fuel_pct"], obd["tank_l"], ",".join(obd["dtcs"]), int(obd["weak_battery"]),
+         ",".join(obd["dtcs"]), device_id),
     )
 
 

@@ -42,6 +42,18 @@ export const STATUS_BADGE = {
 
 const DAY_NAMES = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'];
 
+// Short description of the OBD settings, e.g. "On · 123 456 km · service in 2 300 km · 1 fault code"
+export function obdText(obd, codec) {
+  if (!obd?.enabled) return `Off · Codec ${codec === '8E' ? '8 Extended' : '8'}`;
+  const km = (v) => `${Math.round(v).toLocaleString('en-US')} km`;
+  const parts = ['On', km(obd.odometer_km),
+    obd.service_km > 0 ? `service in ${km(obd.service_km)}` : 'service due',
+    `fuel ${Math.round(obd.fuel_pct)} %`];
+  if (obd.dtcs.length) parts.push(`${obd.dtcs.length} fault code${obd.dtcs.length > 1 ? 's' : ''}`);
+  if (obd.weak_battery) parts.push('weak battery');
+  return parts.join(' · ');
+}
+
 // Short description of a scenario, e.g. "07:30, 16:30 · Mo-Fr"
 export function scenarioText(sc) {
   if (!sc) return 'manual';

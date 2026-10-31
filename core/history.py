@@ -21,8 +21,10 @@ from zoneinfo import ZoneInfo
 
 from . import config, database, scenarios
 from .motion import GpsReceiver, Parked, Trip
+from .obd import ObdUnit
 from .recorder import RecordBuilder, RecordPolicy
 from .tcp_client import TeltonikaClient
+from .teltonika import CODEC_8, CODEC_8_EXT, IO_IGNITION
 
 MAX_DAYS = 90
 SEND_BATCH = 100       # records per packet (Codec 8 allows up to 255)
@@ -44,6 +46,9 @@ class HistorySimulator:
         self.policy = RecordPolicy(max(1, device["interval_s"]), self.realistic)
         self.builder = RecordBuilder(self.realistic, self.rng)
         self.odometer = odometer_m
+        # OBD values follow the simulated drive exactly like in live emulation (core/obd.py).
+        self.obd = ObdUnit(device, self.rng) if device["obd_enabled"] else None
+        self.obd_t = 0.0          # virtual time the OBD state was last advanced to
         self.t = 0.0              # virtual time (Unix seconds)
         self.fix = None
         self.start_ts = self.end_ts = 0.0
@@ -58,7 +63,7 @@ class HistorySimulator:
         """Generator of AvlRecords between the local datetimes `start` and `end`."""
         tz = start.tzinfo
         self.start_ts, self.end_ts = start.timestamp(), end.timestamp()
-        self.t = self.start_ts
+        self.t = self.obd_t = self.start_ts
         other = {"A": "B", "B": "A"}
         leg_s = scenarios.leg_seconds(self.route_duration)
         location, drive_now = scenarios.initial_position(self.cfg, start, leg_s, self.seed)
@@ -92,7 +97,9 @@ class HistorySimulator:
             before = trip.s
             trip.step(1.0)
             self.odometer += trip.s - before
-            self.fix = self.gps.fix(trip.state())
+            vehicle = trip.state()
+            self._advance_obd(trip.s - before, vehicle)
+            self.fix = self.gps.fix(vehicle)
             trigger = self.policy.check(self.fix, self.t)
             if trigger is not None:
                 yield self._record(trigger, trip_start)
@@ -102,7 +109,10 @@ class HistorySimulator:
         points, _profile = self.legs["forward"]
         heading = self.fix["heading"] if self.fix else 0.0
         parked = Parked(points[-1] if location == "B" else points[0], heading, realistic=self.realistic)
+        if self.obd:
+            self.obd.park()
         while self.t < until:
+            self._advance_obd(0.0, parked.state())     # one long step: the engine cools down
             self.fix = self.gps.fix(parked.state())
             trigger = self.policy.check(self.fix, self.t)
             if trigger is not None:
@@ -110,9 +120,18 @@ class HistorySimulator:
             next_record = self.policy.last[0] + self.policy.parked_period
             self.t = min(until, max(self.t + 1.0, next_record))
 
+    def _advance_obd(self, distance_m, vehicle):
+        if self.obd and self.t > self.obd_t:
+            self.obd.step(self.t - self.obd_t, distance_m, vehicle)
+            self.obd_t = self.t
+
     def _record(self, trigger, trip_start):
+        obd_io = None
+        if self.obd:
+            obd_io = self.obd.record_io(ignition_switched_on=trigger == IO_IGNITION and self.fix["ignition"])
         record = self.builder.build(self.fix, int(self.t * 1000), self.odometer, self.odometer - trip_start,
-                                    event_io_id=trigger)
+                                    event_io_id=trigger, extra_io=obd_io,
+                                    weak_battery=bool(self.obd and self.obd.state.weak_battery))
         self.policy.saved(self.fix, self.t)
         return record
 
@@ -164,7 +183,8 @@ class HistoryJob(threading.Thread):
             print(f"[history] {device['name']}: {self.period}")
 
             sim = HistorySimulator(device, route, cfg, seed=self.device_id, odometer_m=device["odometer_m"])
-            client = TeltonikaClient(server["host"], server["port"], device["imei"], config.TCP_TIMEOUT_S)
+            codec = CODEC_8_EXT if device["codec"] == "8E" else CODEC_8
+            client = TeltonikaClient(server["host"], server["port"], device["imei"], config.TCP_TIMEOUT_S, codec)
             batch = []
             for record in sim.records(start, end, cancelled=self.cancel_event.is_set):
                 batch.append(record)
@@ -183,6 +203,11 @@ class HistoryJob(threading.Thread):
                     " current_bearing = ?, last_sent_at = ?, updated_at = ? WHERE id = ?",
                     (sim.odometer, sim.fix["lat"], sim.fix["lon"], round(sim.fix["heading"], 1),
                      _utc_now(), _utc_now(), self.device_id))
+                if sim.obd:
+                    # OBD mileage, fuel, ... continue from the end of the history too.
+                    fields = sim.obd.state.stored_fields()
+                    db.execute(f"UPDATE devices SET {', '.join(f'{k} = ?' for k in fields)} WHERE id = ?",
+                               (*fields.values(), self.device_id))
                 db.commit()
             self.progress = sim.progress if self.cancel_event.is_set() else 1.0
             self.state = "cancelled" if self.cancel_event.is_set() else "done"

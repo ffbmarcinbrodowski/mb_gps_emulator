@@ -33,8 +33,10 @@ from . import config, database, geo, scenarios
 from .events import EVENTS
 from .history import HistoryJob
 from .motion import GpsReceiver, Parked, Trip
+from .obd import ObdUnit
 from .recorder import RecordBuilder, RecordPolicy
 from .tcp_client import TeltonikaClient
+from .teltonika import CODEC_8, CODEC_8_EXT, IO_IGNITION
 
 TICK_S = 1.0              # simulation step
 SEND_BATCH = 50           # records per packet when sending the buffer
@@ -90,8 +92,11 @@ class DeviceWorker(threading.Thread):
         self.odometer = device["odometer_m"]
         self.trip_start_odometer = self.odometer
         self.builder = RecordBuilder(self.realistic, self.rng)
+        # OBD-II values (FMB003), sent with Codec 8 Extended - see core/obd.py
+        self.obd = ObdUnit(device, self.rng) if device["obd_enabled"] else None
+        codec = CODEC_8_EXT if device["codec"] == "8E" else CODEC_8
 
-        self.client = TeltonikaClient(server["host"], server["port"], device["imei"], config.TCP_TIMEOUT_S)
+        self.client = TeltonikaClient(server["host"], server["port"], device["imei"], config.TCP_TIMEOUT_S, codec)
         self._update(status="running", last_error=None)
         self._set_route("running")
         print(f"[emulator] {device['name']} started -> {server['host']}:{server['port']}")
@@ -194,6 +199,8 @@ class DeviceWorker(threading.Thread):
         distance = geo.cumulative_distances(points)[-1] if at_b else 0.0
         self.trip = Parked(points[-1] if at_b else points[0], heading, distance, self.realistic)
         self.fix = self.gps.fix(self.trip.state())
+        if self.obd:
+            self.obd.park()
         next_trip = f"{scenarios.DAY_NAMES[until.weekday()]} {until:%d.%m. %H:%M}" if until else None
         self._update(direction="forward", activity="parked", next_trip_at=next_trip, progress_m=distance)
         return self._simulate(lambda: until is not None and datetime.now(tz) >= until)
@@ -209,8 +216,12 @@ class DeviceWorker(threading.Thread):
             dt, last = now - last, now
             before = self.trip.s
             self.trip.step(dt)
-            self.odometer += max(0.0, self.trip.s - before)
-            self.fix = self.gps.fix(self.trip.state())
+            driven = max(0.0, self.trip.s - before)
+            self.odometer += driven
+            vehicle = self.trip.state()
+            if self.obd:
+                self.obd.step(dt, driven, vehicle)
+            self.fix = self.gps.fix(vehicle)
             self._maybe_record(now)
             if done():
                 return True
@@ -234,8 +245,14 @@ class DeviceWorker(threading.Thread):
 
     def _record(self, event=None, event_io_id=0):
         """Save a record (like the tracker does), send the buffer, store the live state."""
+        obd_io = None
+        if self.obd:
+            # Changed OBD values; all of them for events; the VIN when the ignition is switched on.
+            obd_io = self.obd.record_io(ignition_switched_on=event_io_id == IO_IGNITION and self.fix["ignition"],
+                                        everything=event is not None)
         self.buffer.append(self.builder.build(
-            self.fix, geo.now_ms(), self.odometer, self.odometer - self.trip_start_odometer, event, event_io_id))
+            self.fix, geo.now_ms(), self.odometer, self.odometer - self.trip_start_odometer, event, event_io_id,
+            extra_io=obd_io, weak_battery=bool(self.obd and self.obd.state.weak_battery)))
         del self.buffer[:-MAX_BUFFER]
         self.policy.saved(self.fix, time.monotonic())
         error = self._flush()
@@ -245,6 +262,8 @@ class DeviceWorker(threading.Thread):
             current_speed=round(self.fix["speed_kmh"], 1), current_bearing=round(self.fix["heading"], 1),
             progress_m=self.trip.s, odometer_m=self.odometer, last_error=error,
         )
+        if self.obd:
+            fields.update(self.obd.state.stored_fields())     # survive restarts like the odometer
         if error is None:
             fields["last_sent_at"] = _utc_now()
         if event:
@@ -297,6 +316,10 @@ class DeviceWorker(threading.Thread):
             elif event_type == "crash":
                 self.trip.crash()
                 self._update(scenario_enabled=0)   # a crashed vehicle doesn't follow its plan
+            elif event.get("obd_action"):
+                if not self.obd:
+                    continue                       # the API refuses this; just in case
+                self.obd.apply(event["obd_action"])
 
             self.fix = self.gps.fix(self.trip.state())
             self._record(event=event)

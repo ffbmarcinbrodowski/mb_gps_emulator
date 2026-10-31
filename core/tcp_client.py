@@ -12,7 +12,8 @@ class TeltonikaError(Exception):
 
 
 class TeltonikaClient:
-    def __init__(self, host, port, imei, timeout=5):
+    def __init__(self, host, port, imei, timeout=5, codec=teltonika.CODEC_8):
+        self.codec = codec          # Codec 8, or Codec 8 Extended for OBD data
         self.host = host
         self.port = int(port)
         self.imei = imei
@@ -37,7 +38,7 @@ class TeltonikaClient:
         if self.sock is None:
             self.connect()
         try:
-            self.sock.sendall(teltonika.encode_avl_packet(records))
+            self.sock.sendall(teltonika.encode_avl_packet(records, self.codec))
             (accepted,) = struct.unpack(">I", self._recv_exact(4))
         except Exception:
             self.close()  # force a fresh connection on the next tick

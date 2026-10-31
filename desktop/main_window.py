@@ -157,12 +157,17 @@ class MainWindow(QMainWindow):
 
         # Event menu: one entry per event in core/events.py
         self.event_menu = QMenu("Event", self)
+        self.obd_event_actions = []
         for e in events.catalog():
             action = self.event_menu.addAction(f"{e['label']}{' *' if e['needs_model'] else ''}")
+            if e["needs_obd"]:
+                self.obd_event_actions.append(action)
             action.setStatusTip(f"Traccar: {e['traccar']}")
             action.triggered.connect(lambda _=False, t=e["type"], label=e["label"]: self.send_event(t, label))
         self.event_menu.addSeparator()
         note = self.event_menu.addAction("* Traccar decodes it only if the device's Model is set, e.g. FMB920")
+        note.setEnabled(False)
+        note = self.event_menu.addAction("OBD events need OBD enabled in the device settings")
         note.setEnabled(False)
 
         toolbar = self.addToolBar("Main")
@@ -305,6 +310,8 @@ class MainWindow(QMainWindow):
         self.act_stop.setEnabled(running)
         self.event_menu.setEnabled(running)
         self.event_button.setEnabled(running)
+        for action in self.obd_event_actions:
+            action.setEnabled(bool(d) and d["obd"]["enabled"])
         # History follows the scenario and must not mix with live data.
         self.act_history.setEnabled(bool(d) and bool(d["scenario"]) and not running)
         running_count = sum(1 for x in self.model.devices if x["status"] == "running")
@@ -388,7 +395,14 @@ class MainWindow(QMainWindow):
 
     def send_event(self, event_type, label):
         d = self._selected()
-        if d and self.emulator.trigger(d["id"], event_type):
+        if not d:
+            return
+        try:
+            services.check_event(self.db, d["id"], event_type)
+        except services.ServiceError as err:
+            QMessageBox.information(self, "Event", err.message)
+            return
+        if self.emulator.trigger(d["id"], event_type):
             self.statusBar().showMessage(f"{label} sent from {d['name']}", 5000)
         else:
             QMessageBox.information(self, "Event", "Start the device first - events need an open connection.")

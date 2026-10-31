@@ -5,7 +5,7 @@ import { initDeviceForm } from './deviceForm.js';
 import { initHistory } from './history.js';
 import { createMap, deviceIcon, endpointMarker, routeLine } from './map.js';
 import { initServers } from './servers.js';
-import { STATUS_BADGE, esc, fmtCoord, fmtKm, scenarioText, toast } from './ui.js';
+import { STATUS_BADGE, esc, fmtCoord, fmtKm, obdText, scenarioText, toast } from './ui.js';
 
 const POLL_MS = 2000;
 const $ = (id) => document.getElementById(id);
@@ -92,6 +92,9 @@ function deviceCard(d) {
         <i class="bi bi-calendar-week"></i> ${esc(scenarioText(d.scenario))}
         ${d.activity === 'driving' ? ` · driving ${d.direction === 'return' ? 'B → A' : 'A → B'}` : ''}
         ${d.next_trip_at ? ` · next ${esc(d.next_trip_at)}` : ''}</div>` : ''}
+      ${d.obd.enabled ? `<div class="meta text-success-emphasis">
+        <i class="bi bi-speedometer2"></i> OBD ${esc(obdText(d.obd, d.codec).replace(/^On · /, ''))}
+        ${d.obd.dtcs.length ? ` (${esc(d.obd.dtcs.join(', '))})` : ''}</div>` : ''}
       ${d.last_event ? `<div class="meta text-warning-emphasis">
         <i class="bi bi-lightning-charge"></i> Last event: ${esc(d.last_event)} · ${esc(d.last_event_local)}</div>` : ''}
       ${d.last_error ? `<div class="meta text-danger text-break">${esc(d.last_error)}</div>` : ''}
@@ -167,6 +170,10 @@ async function renderSelected(fit = false) {
     : '';
   // Events need an open connection, so only a running device can send them.
   $('btnEvent').disabled = d?.status !== 'running';
+  // OBD events (fault codes, battery, service) only for devices with OBD.
+  for (const item of $('eventMenu').querySelectorAll('[data-needs-obd]')) {
+    item.disabled = !d?.obd.enabled;
+  }
   // History follows the scenario and must not mix with live data.
   $('btnHistory').disabled = !d?.scenario || d.status === 'running';
 
@@ -237,13 +244,15 @@ $('btnStopAll').addEventListener('click', async () => {
 async function initEventMenu() {
   const events = await api.emulator.events();
   $('eventMenu').innerHTML = events.map((e) => `
-      <li><button class="dropdown-item" data-event="${e.type}" data-label="${esc(e.label)}">
+      <li><button class="dropdown-item" data-event="${e.type}" data-label="${esc(e.label)}"
+          ${e.needs_obd ? 'data-needs-obd' : ''}>
         ${esc(e.label)}${e.needs_model ? ' *' : ''}
         <div class="traccar text-secondary">Traccar: ${esc(e.traccar)}</div>
       </button></li>`).join('')
     + `<li><hr class="dropdown-divider"></li>
        <li><span class="dropdown-item-text small text-secondary">
-         * Traccar decodes it only if the device's <b>Model</b> is set, e.g. FMB920
+         * Traccar decodes it only if the device's <b>Model</b> is set, e.g. FMB920.<br>
+         OBD events need OBD enabled in the device settings.
        </span></li>`;
 }
 

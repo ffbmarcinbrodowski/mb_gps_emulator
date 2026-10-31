@@ -60,10 +60,37 @@ EVENTS = {
 }
 
 
+# OBD events (devices with OBD enabled, see core/obd.py). The record carries all OBD values;
+# "obd_action" says what changes in the vehicle.
+EVENTS.update({
+    "dtc_set": {
+        "label": "Set fault code", "io_id": 30, "value": None, "priority": 1, "obd_action": "dtc_set",
+        "traccar": "faultCount, dtcs", "needs_model": True, "needs_obd": True,
+    },
+    "dtc_clear": {
+        "label": "Clear fault codes", "io_id": 30, "value": None, "priority": 1, "obd_action": "dtc_clear",
+        "traccar": "faultCount, dtcs", "needs_model": True, "needs_obd": True,
+    },
+    "battery_weak": {
+        "label": "Weak battery", "io_id": 66, "value": None, "priority": 1, "obd_action": "battery_weak",
+        "traccar": "power < 12 V while parked", "needs_model": False, "needs_obd": True,
+    },
+    "battery_ok": {
+        "label": "Battery OK", "io_id": 66, "value": None, "priority": 0, "obd_action": "battery_ok",
+        "traccar": "power", "needs_model": False, "needs_obd": True,
+    },
+    "service_due": {
+        "label": "Service due", "io_id": 402, "value": None, "priority": 1, "obd_action": "service_due",
+        "traccar": "io402 = 0", "needs_model": False, "needs_obd": True,
+    },
+})
+
+
 def catalog():
     """Public list for the UI."""
     return [
-        {"type": key, "label": e["label"], "traccar": e["traccar"], "needs_model": e["needs_model"]}
+        {"type": key, "label": e["label"], "traccar": e["traccar"], "needs_model": e["needs_model"],
+         "needs_obd": e.get("needs_obd", False)}
         for key, e in EVENTS.items()
     ]
 
@@ -71,6 +98,8 @@ def catalog():
 def name_for(io_id, value):
     """Event label for a decoded record (used by tools/fake_server.py)."""
     for e in EVENTS.values():
+        if "obd_action" in e:
+            continue                      # OBD events are shown by their IO values
         if e["io_id"] == io_id and e["value"] in (None, value):
             return e["label"]
     return None

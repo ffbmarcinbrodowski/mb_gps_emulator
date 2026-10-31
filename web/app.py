@@ -91,6 +91,12 @@ def devices_new_imei():
     return jsonify({"imei": services.new_imei(get_db())})
 
 
+@app.get("/api/devices/new-vin")
+def devices_new_vin():
+    """A realistic VIN for the "Generate" button of the OBD settings."""
+    return jsonify({"vin": services.new_vin()})
+
+
 @app.get("/api/devices/<int:device_id>")
 def devices_get(device_id):
     device = models.get_device(get_db(), device_id)
@@ -161,6 +167,12 @@ def scenarios_preview():
     return jsonify(services.scenario_preview(request.get_json(force=True)))
 
 
+@app.post("/api/obd/check")
+def obd_check():
+    """Validate OBD settings and return them normalized (used by the OBD dialog's Apply)."""
+    return jsonify(services.parse_obd(request.get_json(force=True)))
+
+
 @app.get("/api/settings")
 def settings_get():
     return jsonify({"timezone": config.TIMEZONE})
@@ -208,8 +220,7 @@ def emulator_event():
     data = request.get_json(force=True)
     device_id = services.parse_id(data, "device_id")
     event_type = data.get("type")
-    if event_type not in events.EVENTS:
-        raise services.ServiceError(f"Unknown event type '{event_type}'")
+    services.check_event(get_db(), device_id, event_type)
     if not emulator.trigger(device_id, event_type):
         raise services.ServiceError("Device is not running - start it first", 409)
     return jsonify({"ok": True})

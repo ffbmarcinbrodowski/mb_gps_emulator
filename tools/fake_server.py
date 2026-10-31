@@ -14,8 +14,35 @@ import sys
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from core import obd  # noqa: E402
 from core.events import name_for  # noqa: E402
 from core.teltonika import decode_avl_packet  # noqa: E402
+
+
+# Readable names for the OBD values of an FMB003 (Codec 8 Extended, see core/obd.py).
+OBD_NAMES = {
+    obd.IO_OEM_MILEAGE: ("mileage", "km"), obd.IO_OEM_SERVICE: ("service in", "km"),
+    obd.IO_FUEL_LEVEL: ("fuel", "%"), obd.IO_COOLANT_TEMP: ("coolant", "°C"), obd.IO_ENGINE_RPM: ("rpm", ""),
+    obd.IO_ENGINE_LOAD: ("load", "%"), obd.IO_FUEL_RATE: ("fuel rate", "l/h"),
+    obd.IO_DTC_COUNT: ("DTCs", ""), obd.IO_MIL_DISTANCE: ("MIL distance", "km"),
+    obd.IO_VIN: ("VIN", ""), obd.IO_FAULT_CODES: ("fault codes", ""),
+}
+
+
+def show_obd(io):
+    parts = []
+    for io_id, (name, unit) in OBD_NAMES.items():
+        if io_id in io:
+            value = io[io_id]
+            if isinstance(value, bytes):
+                value = value.decode("ascii") or "(none)"
+            elif io_id == obd.IO_COOLANT_TEMP and value > 127:
+                value -= 256                                   # signed byte
+            elif io_id == obd.IO_FUEL_RATE:
+                value = f"{value / 100:.2f}"                     # sent as l/h x 100
+            parts.append(f"{name} {value}{' ' + unit if unit else ''}")
+    if parts:
+        print("      OBD: " + ", ".join(parts))
 
 
 class Handler(socketserver.BaseRequestHandler):
@@ -46,8 +73,11 @@ class Handler(socketserver.BaseRequestHandler):
                     ts = datetime.fromtimestamp(r["timestamp_ms"] / 1000, timezone.utc).strftime("%H:%M:%S")
                     print(f"    {imei} {ts}  {r['lat']:.6f},{r['lon']:.6f}  "
                           f"{r['speed_kmh']:>3} km/h  {r['angle']:>3}°  alt {r['altitude']} m  io {r['io']}")
+                    show_obd(r["io"])
                     if r["event_io_id"]:
-                        if r["event_io_id"] == 239:
+                        if r["event_io_id"] in OBD_NAMES or r["event_io_id"] == 66:
+                            name = "OBD / battery change"
+                        elif r["event_io_id"] == 239:
                             name = "Ignition " + ("on" if r["io"].get(239) else "off")
                         else:
                             name = name_for(r["event_io_id"], r["io"].get(r["event_io_id"]))

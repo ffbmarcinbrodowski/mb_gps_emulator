@@ -6,9 +6,10 @@ Seed the database with example servers and devices (around Saarbrücken).
 
 Routes are generated with GraphHopper; if that fails a straight line is used.
 """
+import random
 import sys
 
-from core import database, graphhopper, models
+from core import database, graphhopper, models, obd
 
 SERVERS = [
     {"name": "Local Traccar", "host": "127.0.0.1", "port": 5027},
@@ -23,6 +24,14 @@ DEVICES = [
      "interval_s": 5, "speed_kmh": 110},
     {"name": "Teltonika003", "imei": "356307042441003", "start": [49.2790, 7.1150], "end": [49.2160, 7.1080],
      "interval_s": 10, "speed_kmh": 90},   # e.g. a truck
+]
+
+# OBD-II values (Teltonika FMB003, Codec 8 Extended): one car nearly due for service,
+# one with a stored fault code, one high-mileage vehicle with a big tank.
+OBD = [
+    {"odometer_km": 48_210, "service_km": 12_400, "fuel_pct": 64, "tank_l": 50, "dtcs": []},
+    {"odometer_km": 131_870, "service_km": 350, "fuel_pct": 38, "tank_l": 55, "dtcs": ["P0420"]},
+    {"odometer_km": 243_500, "service_km": 8_900, "fuel_pct": 81, "tank_l": 90, "dtcs": []},
 ]
 
 
@@ -42,17 +51,20 @@ def main():
     # Devices point to the fake server by default, so they work out of the box.
     default_server = server_ids[1]
 
-    for d in DEVICES:
+    rng = random.Random(42)      # the same VINs on every seed
+    for d, o in zip(DEVICES, OBD):
         try:
             route = graphhopper.generate_route(d["start"], d["end"])
             source = "GraphHopper"
         except graphhopper.RoutingError as exc:
             route = graphhopper.straight_line_route(d["start"], d["end"])
             source = f"straight line ({exc})"
-        device_id = models.create_device(db, {**d, "server_id": default_server})
+        settings = {**o, "enabled": True, "codec": "8E", "vin": obd.generate_vin(rng), "weak_battery": False}
+        device_id = models.create_device(db, {**d, "server_id": default_server, "obd": settings})
         models.save_route(db, device_id, d["start"], d["end"], route)
         db.commit()
-        print(f"  {d['name']}: {route['distance_m'] / 1000:.1f} km, {len(route['points'])} points via {source}")
+        print(f"  {d['name']}: {route['distance_m'] / 1000:.1f} km, {len(route['points'])} points via {source},"
+              f" VIN {settings['vin']}")
 
     print(f"Seeded {len(SERVERS)} servers and {len(DEVICES)} devices.")
     db.close()

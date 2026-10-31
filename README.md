@@ -36,8 +36,9 @@ It comes with two interfaces on top of the same core:
   - records are buffered while the server is offline and sent later.
 - **Live map:** device markers update every 2 seconds. Works on desktop and iPhone.
 - **Events:** send crash, towing, GSM jamming, power cut, harsh acceleration/braking/cornering, alarm/SOS or overspeed on demand, to test how your server reacts.
+- **OBD-II (Teltonika FMB003):** mileage, km to service, fuel level, coolant temperature, RPM, engine load, fuel rate, fault codes and VIN, sent with Codec 8 Extended. The values follow the drive (fuel use from a simple vehicle model, engine warm-up and cool-down). Fault codes, a weak battery and "service due" can be triggered as events.
 - **Servers:** manage a list of target servers (host + port).
-- **Protocol:** real Teltonika Codec 8 over TCP, with IMEI handshake, CRC-16 and record acknowledgement. The encoder is verified byte-for-byte against the example in the Teltonika wiki.
+- **Protocol:** real Teltonika Codec 8 and Codec 8 Extended over TCP, with IMEI handshake, CRC-16 and record acknowledgement. The encoder is verified byte-for-byte against the example in the Teltonika wiki.
 - **Fake server:** a small built-in test server prints every decoded record, so you can try the emulator without Traccar.
 - **Two UIs, one core:** the protocol, emulation, events and validation are shared by the web and desktop apps.
 
@@ -202,6 +203,45 @@ Teltonika model such as `FMB920`. Without it, the value only appears as an attri
 To get notified, go to **Settings → Notifications → +**, choose type **Alarm**, select the alarms
 (e.g. *Accident*) and a channel (e.g. *Web*), and tick **All Devices**.
 
+## OBD-II data (FMB003)
+
+In the device dialog, **OBD → Edit…** turns on OBD data. It switches the device to **Codec 8 Extended**,
+which a real FMB003 uses for IO ids above 255, the VIN and the fault codes. Settings: VIN (**Generate**
+creates a realistic one with a valid check digit), mileage, km to the next service, fuel level and tank
+size, stored fault codes and a weak battery. While the device drives, mileage, fuel, service distance and
+the other values change; they are saved, so the next drive continues from there. The tank is refilled
+when it drops below 15 % while parked.
+
+In Traccar, set the device's **Model** to `FMB003`, or several values are not decoded.
+Traccar 6.15 maps them to these position attributes:
+
+| Value | Teltonika IO | Traccar attribute |
+|---|---|---|
+| Mileage (OEM odometer) | 389 | `obdOdometer` (km × 1000, i.e. metres) – only with model `FMB003` |
+| Km to service | 402 | `io402` (km; 0 = service due or overdue) |
+| Fuel level | 48 | `io48` (%) |
+| Fuel rate | 60 | `io60` (l/h × 100) |
+| Coolant temperature | 32 | `coolantTemp` (°C) |
+| Engine RPM / load | 36 / 31 | `rpm` / `engineLoad` (%) |
+| Number of fault codes | 30 | `faultCount` |
+| Distance with MIL on | 43 | `milDistance` (km) |
+| VIN | 256 | `vin` |
+| Fault codes | 281 | `dtcs` (space separated, e.g. `P0420 P0171`) |
+
+Like a real FMB003, the emulator sends OBD values **only when they change** (and all of them on
+ignition on and with every event record). The VIN is sent on ignition on. So the *latest* position
+often has no OBD attributes. To keep the last values on every position, Traccar needs both:
+
+1. in `traccar.xml`: `<entry key='processing.copyAttributes.enable'>true</entry>` (restart Traccar), and
+2. the attribute `processing.copyAttributes` on the device (or in `traccar.xml`), e.g.
+   `obdOdometer,io402,io48,io60,coolantTemp,rpm,engineLoad,faultCount,milDistance,vin,dtcs`.
+
+The copy starts with the next record that carries the values (e.g. the next ignition on).
+
+OBD events (**Event ▾**, only for devices with OBD): *Set fault code* (adds a typical code),
+*Clear fault codes*, *Weak battery* / *Battery OK* (voltage ~11.7 V while parked) and *Service due*
+(km to service = 0).
+
 ## Desktop app
 
 ![Desktop app](docs/screenshots/desktop-main.jpg)
@@ -273,6 +313,7 @@ docker compose exec emulator python tools/fake_server.py     # inside the contai
 | `EMULATOR_PORT` | `5057` | Web port |
 | `EMULATOR_HOST` | `0.0.0.0` | Bind address |
 | `EMULATOR_TIMEZONE` | the computer's zone (UTC in Docker) | Time zone of scenario times, e.g. `Europe/Berlin` |
+| `TRACCAR_URL`, `TRACCAR_USER`, `TRACCAR_PASSWORD` | – | Optional: a Traccar instance for manual integration tests (not used by the app) |
 | `EMULATOR_DB` | web: `./emulator.db` (Docker: `/data/emulator.db`), desktop: app data folder | SQLite database path |
 
 More constants are in `config.py`: speed variation, TCP timeout and the routing profile.
@@ -302,6 +343,9 @@ device → server : [4B zero][4B length][0x08][N][AVL records][N][4B CRC-16/IBM]
 server → device : [4B number of accepted records]
 ```
 
+Codec 8 Extended (`0x8E`, used with OBD) has 2-byte IO ids and counts, a 2-byte event IO id and an extra
+section of variable-length values (VIN, fault codes).
+
 ## REST API
 
 | Method | Endpoint | Description |
@@ -317,6 +361,8 @@ server → device : [4B number of accepted records]
 | GET | `/api/emulator/events` | Available events |
 | POST | `/api/emulator/event` | `{device_id: 1, type: "crash"}` |
 | GET | `/api/emulator/status` | IDs of running devices |
+| GET | `/api/devices/new-imei`, `/api/devices/new-vin` | A test IMEI / a realistic VIN |
+| POST | `/api/obd/check` | Validate OBD settings → normalized `{enabled, codec, vin, …}` |
 | POST | `/api/scenarios/preview` | `{scenario: {...}, duration_s: 1290}` → next departures + warnings |
 | GET | `/api/settings` | `{timezone}` |
 | POST | `/api/history` | `{device_id: 1, days: 7}` → start generating history |
@@ -332,7 +378,8 @@ core/                 shared core, no UI code
   migrations/         SQL schema migrations
   models.py           SQL for servers, devices, routes
   services.py         validation + create/update/delete (used by both UIs)
-  teltonika.py        Codec 8 encoder/decoder, CRC-16/IBM
+  teltonika.py        Codec 8 / 8 Extended encoder/decoder, CRC-16/IBM
+  obd.py              OBD-II values of an FMB003: vehicle model, fault codes, VIN, on-change reporting
   tcp_client.py       TCP client: IMEI handshake, send, acknowledgement
   geo.py              distance, bearing, interpolation along the route
   graphhopper.py      route generation

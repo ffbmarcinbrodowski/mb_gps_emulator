@@ -42,7 +42,14 @@ class DeviceTableModel(QAbstractTableModel):
         if role == Qt.ToolTipRole:
             if col == 0:
                 mode = "realistic" if d["realistic"] else "simple"
-                return f"IMEI {d['imei']}\nOdometer {d['odometer_m'] / 1000:.1f} km\n{mode} driving, max {d['speed_kmh']:.0f} km/h"
+                text = f"IMEI {d['imei']}\nOdometer {d['odometer_m'] / 1000:.1f} km\n{mode} driving, max {d['speed_kmh']:.0f} km/h"
+                if d["obd"]["enabled"]:
+                    o = d["obd"]
+                    service = f"service in {o['service_km']:,.0f} km" if o["service_km"] > 0 else "service due"
+                    text += f"\nOBD: VIN {o['vin']}, {o['odometer_km']:,.0f} km, {service}, fuel {o['fuel_pct']:.0f} %"
+                    if o["dtcs"]:
+                        text += f"\nFault codes: {', '.join(o['dtcs'])}"
+                return text
             if col == COL_ERROR and d["last_error"]:
                 return d["last_error"]
         return None

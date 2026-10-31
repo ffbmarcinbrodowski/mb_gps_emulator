@@ -127,6 +127,14 @@
               </button>
             </div>
 
+            <h3 class="h6 text-secondary mt-4 mb-2">OBD (FMB003)</h3>
+            <div class="d-flex align-items-center gap-2 ms-1">
+              <span class="small flex-grow-1" id="obdSummary">Off · Codec 8</span>
+              <button type="button" class="btn btn-sm btn-outline-secondary" id="btnObd">
+                <i class="bi bi-speedometer2"></i> Edit…
+              </button>
+            </div>
+
             <h3 class="h6 text-secondary mt-4 mb-2">Server</h3>
             <select class="form-select form-select-sm mb-2" id="fServer" required></select>
             <div class="form-row-label">
@@ -198,6 +206,81 @@
           Traccar listens for Teltonika devices on port <strong>5027</strong> by default.
           Each device's IMEI must also be added as a device in Traccar.
         </p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== OBD modal (opened from the device dialog) ===== -->
+<div class="modal fade" id="obdModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static">
+  <div class="modal-dialog modal-dialog-centered modal-fullscreen-sm-down">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title h5 text-secondary">OBD (Teltonika FMB003)</h2>
+      </div>
+      <div class="modal-body">
+        <p class="small text-secondary mb-2">
+          OBD values are sent with Codec 8 Extended and change with the drive (mileage, fuel, coolant, RPM).
+          In Traccar set the device model to <b>FMB003</b>.
+        </p>
+        <div class="form-check form-switch mb-3">
+          <input class="form-check-input" type="checkbox" role="switch" id="obdEnabled">
+          <label class="form-check-label" for="obdEnabled">Send OBD data</label>
+        </div>
+        <div class="form-row-label">
+          <label for="obdCodec">Codec</label>
+          <select class="form-select form-select-sm" id="obdCodec">
+            <option value="8">Codec 8</option>
+            <option value="8E">Codec 8 Extended</option>
+          </select>
+        </div>
+        <div id="obdFields">
+          <div class="form-row-label">
+            <label for="obdVin">VIN</label>
+            <div class="input-group input-group-sm">
+              <input class="form-control mono" id="obdVin" maxlength="17" autocapitalize="characters">
+              <button class="btn btn-outline-secondary" type="button" id="btnGenerateVin">
+                <i class="bi bi-shuffle"></i> Generate
+              </button>
+            </div>
+          </div>
+          <div class="form-row-label">
+            <label for="obdOdometer">Mileage</label>
+            <div class="input-group input-group-sm">
+              <input type="number" class="form-control" id="obdOdometer" min="0" max="2000000">
+              <span class="input-group-text">km</span>
+            </div>
+          </div>
+          <div class="form-row-label">
+            <label for="obdService">Service in</label>
+            <div class="input-group input-group-sm">
+              <input type="number" class="form-control" id="obdService" min="0" max="100000">
+              <span class="input-group-text">km</span>
+            </div>
+          </div>
+          <div class="form-row-label">
+            <label for="obdFuel">Fuel</label>
+            <div class="input-group input-group-sm">
+              <input type="number" class="form-control" id="obdFuel" min="0" max="100">
+              <span class="input-group-text">% of</span>
+              <input type="number" class="form-control" id="obdTank" min="20" max="200" title="Tank size">
+              <span class="input-group-text">l</span>
+            </div>
+          </div>
+          <div class="form-row-label">
+            <label for="obdDtcs">Fault codes</label>
+            <input class="form-control form-control-sm mono" id="obdDtcs" placeholder="none, e.g. P0420, P0171">
+          </div>
+          <div class="form-check ms-1">
+            <input class="form-check-input" type="checkbox" id="obdWeakBattery">
+            <label class="form-check-label" for="obdWeakBattery">Weak battery (low voltage while parked)</label>
+          </div>
+        </div>
+        <div class="small text-danger mt-2" id="obdError"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" id="btnObdCancel">Cancel</button>
+        <button type="button" class="btn btn-primary" id="btnObdApply">Apply</button>
       </div>
     </div>
   </div>

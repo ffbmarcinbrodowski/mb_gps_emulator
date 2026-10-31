@@ -2,6 +2,7 @@
 
 import { api } from './api.js';
 import { createMap, endpointMarker, routeLine } from './map.js';
+import { initObdForm } from './obdForm.js';
 import { initScenarioForm } from './scenarioForm.js';
 import { esc, fmtCoord, fmtDuration, fmtKm, parseLatLon } from './ui.js';
 
@@ -27,6 +28,7 @@ export function initDeviceForm({ onSaved }) {
     durationS: () => state.preview?.duration_s ?? state.savedDurationS,
     deviceId: () => state.editingId,
   });
+  const obd = initObdForm({ deviceModal: modal });
 
   // Leaflet needs a visible container -> create/resize the map once the modal is shown.
   modalEl.addEventListener('shown.bs.modal', () => {
@@ -175,6 +177,7 @@ export function initDeviceForm({ onSaved }) {
     if (map) drawLine(null);
     setRouteInfo('Click the map to set the start, then the end point.');
     scenario.reset();
+    obd.reset();
     showError(null);
   }
 
@@ -212,6 +215,7 @@ export function initDeviceForm({ onSaved }) {
       setRouteInfo(`${fmtKm(device.route.distance_m)} · saved route`);
     }
     scenario.load(device.scenario);
+    obd.load(device.obd, device.codec);
     // The map may only be created on 'shown', so draw the saved route after that.
     modalEl.addEventListener('shown.bs.modal', () => {
       if (device.route) drawLine(device.route.points);
@@ -243,6 +247,8 @@ export function initDeviceForm({ onSaved }) {
     };
     // Send the previewed route so the backend does not call GraphHopper twice.
     if (state.preview) payload.route = state.preview;
+    // OBD only when edited: a running device keeps counting its mileage meanwhile.
+    if (obd.value()) payload.obd = obd.value();
 
     try {
       const saved = state.editingId

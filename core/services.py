@@ -9,7 +9,7 @@ import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from . import config, graphhopper, history, models, scenarios
+from . import config, events, graphhopper, history, models, obd, scenarios
 from .imei import generate_imei
 
 
@@ -79,6 +79,8 @@ def parse_device(db, data):
         # Realistic driving (road speeds, acceleration, stops, GPS noise) unless switched off.
         "realistic": bool(data.get("realistic", True)),
         "scenario": parse_scenario(data.get("scenario")),
+        # Only present when the OBD settings were edited (see models.update_device).
+        "obd": parse_obd(data.get("obd")),
         "start": _point(data, "start"),
         "end": _point(data, "end"),
     }
@@ -125,6 +127,61 @@ def parse_scenario(value):
     if kind in ("times", "interval"):
         cfg["jitter_min"] = _number(value, "jitter_min", 0, 60, int) if value.get("jitter_min") is not None else 0
     return cfg
+
+
+def parse_obd(value):
+    """Validate codec + OBD settings. None = not edited."""
+    if not value:
+        return None
+    if not isinstance(value, dict):
+        raise ServiceError("Invalid OBD settings")
+    enabled = bool(value.get("enabled"))
+    codec = value.get("codec") or "8"
+    if codec not in ("8", "8E"):
+        raise ServiceError("Codec must be 8 or 8E")
+    if enabled:
+        codec = "8E"     # OBD ids above 255, VIN and fault codes need Codec 8 Extended
+
+    vin = str(value.get("vin") or "").strip().upper()
+    if enabled and not obd.VIN_PATTERN.match(vin):
+        raise ServiceError("VIN must have 17 characters (letters and digits, no I, O or Q)")
+
+    dtcs = value.get("dtcs") or []
+    if isinstance(dtcs, str):
+        dtcs = [c for c in re.split(r"[,;\s]+", dtcs) if c]
+    dtcs = [str(c).strip().upper() for c in dtcs]
+    bad = [c for c in dtcs if not obd.DTC_PATTERN.match(c)]
+    if bad:
+        raise ServiceError(f"Invalid fault code {bad[0]} (format like P0420)")
+    if len(dtcs) > 10:
+        raise ServiceError("At most 10 fault codes")
+
+    return {
+        "enabled": enabled,
+        "codec": codec,
+        "vin": vin,
+        "odometer_km": _number(value, "odometer_km", 0, 2_000_000),
+        "service_km": _number(value, "service_km", 0, 100_000),
+        "fuel_pct": _number(value, "fuel_pct", 0, 100),
+        "tank_l": _number(value, "tank_l", 20, 200) if value.get("tank_l") is not None else 55,
+        "dtcs": list(dict.fromkeys(dtcs)),
+        "weak_battery": bool(value.get("weak_battery")),
+    }
+
+
+def check_event(db, device_id, event_type):
+    """Can this event be sent from this device? (OBD events need OBD enabled.)"""
+    if event_type not in events.EVENTS:
+        raise ServiceError(f"Unknown event type '{event_type}'")
+    if events.EVENTS[event_type].get("needs_obd"):
+        device = models.get_device(db, device_id, include_points=False)
+        if device is None or not device["obd"]["enabled"]:
+            raise ServiceError("Enable OBD for this device first", 409)
+
+
+def new_vin():
+    """A realistic random VIN for the "Generate" button."""
+    return obd.generate_vin()
 
 
 def scenario_preview(data):

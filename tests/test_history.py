@@ -9,7 +9,10 @@ from core.teltonika import IO_IGNITION
 from tests.test_motion import PROFILE, straight_route
 
 TZ = ZoneInfo("Europe/Berlin")
-DEVICE = {"realistic": 1, "speed_kmh": 130, "interval_s": 5}
+DEVICE = {"realistic": 1, "speed_kmh": 130, "interval_s": 5, "obd_enabled": 0}
+OBD_DEVICE = {**DEVICE, "obd_enabled": 1, "vin": "WVWZZZ1KZ9W000123", "obd_odometer_km": 120_000.0,
+              "obd_service_km": 3.0, "obd_fuel_pct": 60.0, "obd_tank_l": 55.0, "obd_dtcs": "", "obd_mil_km": 0.0,
+              "obd_coolant_c": 15.0, "obd_weak_battery": 0}
 POINTS = straight_route()
 ROUTE = {"points": json.dumps(POINTS), "profile": json.dumps(PROFILE), "duration_s": 300,
          "return_points": json.dumps(list(reversed(POINTS))), "return_profile": json.dumps(PROFILE)}
@@ -52,6 +55,20 @@ class HistoryTest(unittest.TestCase):
         odometers = [r.io_4b[16] for r in records]
         self.assertEqual(odometers, sorted(odometers))
         self.assertAlmostEqual(sim.odometer, 4 * 2898, delta=50)      # 4 trips of ~2.9 km
+
+    def test_obd_values_follow_the_history(self):
+        start = datetime(2026, 10, 19, 0, 0, tzinfo=TZ)
+        sim = HistorySimulator(OBD_DEVICE, ROUTE, COMMUTE, seed=1)
+        records = list(sim.records(start, start + timedelta(days=1)))
+        mileage = [r.io_4b[389] for r in records if 389 in r.io_4b]
+        self.assertEqual(mileage, sorted(mileage))                         # never goes back
+        self.assertAlmostEqual(mileage[-1] - 120_000, 2 * 2.9, delta=1.1)  # two trips of ~2.9 km
+        vin_records = [r for r in records if 256 in r.io_nx]
+        ignition_on = [r for r in records if r.event_io_id == IO_IGNITION and r.io_1b[IO_IGNITION] == 1]
+        self.assertEqual(len(vin_records), 1 + len(ignition_on))           # first record + every start
+        self.assertEqual(sim.obd.state.io()["4b"][402], 0)                 # 3 km to service -> due (0)
+        self.assertLess(sim.obd.state.coolant_c, 30)                       # cooled down at the end of the day
+        self.assertLess(len([r for r in records if 36 in r.io_2b]), len(records))   # only on change
 
     def test_same_seed_same_history(self):
         _a, first = generate(COMMUTE, days=1, seed=5)

@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 from core import database, models, services
 
 from .map_view import MapView
+from .obd_dialog import ObdDialog, summary as obd_summary
 from .scenario_widget import ScenarioDialog, summary
 from .tasks import error_text, run_async
 
@@ -45,6 +46,8 @@ class DeviceDialog(QDialog):
         self.preview = None      # route generated in this dialog
         self.saved_duration_s = 0  # duration of the saved route (edit), for the scenario preview
         self.scenario = None       # scenario saved with the device (None = manual)
+        self.obd, self.codec = None, "8"   # OBD settings shown in the summary
+        self.obd_edited = False    # only edited OBD settings are saved (a running device counts its mileage)
         self._route_request = 0  # ignores answers to outdated route requests
         self._alive = True       # background results may arrive after the dialog closed
 
@@ -114,6 +117,16 @@ class DeviceDialog(QDialog):
         scenario_row.addWidget(self.scenario_label, 1)
         scenario_row.addWidget(scenario_btn)
         form.addRow(scenario_row)
+
+        form.addRow(self._section("OBD (FMB003)"))
+        self.obd_label = QLabel(obd_summary(None))
+        self.obd_label.setWordWrap(True)
+        obd_btn = QPushButton("Edit…")
+        obd_btn.clicked.connect(self._edit_obd)
+        obd_row = QHBoxLayout()
+        obd_row.addWidget(self.obd_label, 1)
+        obd_row.addWidget(obd_btn)
+        form.addRow(obd_row)
 
         form.addRow(self._section("Server"))
         self.server = QComboBox()
@@ -210,6 +223,7 @@ class DeviceDialog(QDialog):
         self.realistic.setChecked(d["realistic"])
         self._load_servers(d["server_id"])
         self._set_scenario(d["scenario"])
+        self._set_obd(d["obd"], d["codec"])
         if d["route"]:
             self.saved_duration_s = d["route"]["duration_s"]
             self.start, self.end = d["route"]["start"], d["route"]["end"]
@@ -297,6 +311,17 @@ class DeviceDialog(QDialog):
         if dialog.exec() == QDialog.Accepted:
             self._set_scenario(dialog.scenario)
 
+    # --- OBD -----------------------------------------------------------------------------
+
+    def _set_obd(self, obd, codec, edited=False):
+        self.obd, self.codec, self.obd_edited = obd, codec, edited
+        self.obd_label.setText(obd_summary(obd, codec))
+
+    def _edit_obd(self):
+        dialog = ObdDialog(self, {**self.obd, "codec": self.codec} if self.obd else None)
+        if dialog.exec() == QDialog.Accepted:
+            self._set_obd(dialog.obd, dialog.obd["codec"], edited=True)
+
     # --- Save --------------------------------------------------------------------------
 
     def _set_busy(self, busy):
@@ -330,6 +355,8 @@ class DeviceDialog(QDialog):
         # Send the previewed route so GraphHopper is not called twice.
         if self.preview:
             payload["route"] = self.preview
+        if self.obd_edited:
+            payload["obd"] = self.obd
 
         device_id, emulator = self.device_id, self.emulator
 
@@ -358,6 +385,7 @@ class DeviceDialog(QDialog):
             self.name.clear()
             self.imei.clear()
             self._set_scenario(None)
+            self._set_obd(None, "8")
             self._reset_points()
             self.name.setFocus()
         else:

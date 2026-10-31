@@ -19,6 +19,7 @@ export const api = {
     list: () => request('GET', '/api/devices'),
     get: (id) => request('GET', `/api/devices/${id}`),
     newImei: () => request('GET', '/api/devices/new-imei'),
+    newVin: () => request('GET', '/api/devices/new-vin'),
     create: (data) => request('POST', '/api/devices', data),
     update: (id, data) => request('PUT', `/api/devices/${id}`, data),
     remove: (id) => request('DELETE', `/api/devices/${id}`),
@@ -33,6 +34,9 @@ export const api = {
     start: (deviceId, days) => request('POST', '/api/history', { device_id: deviceId, days }),
     status: (deviceId) => request('GET', `/api/history/${deviceId}`),
     cancel: (deviceId) => request('POST', `/api/history/${deviceId}/cancel`),
+  },
+  obd: {
+    check: (obd) => request('POST', '/api/obd/check', obd),
   },
   scenarios: {
     preview: (scenario, durationS, deviceId) => request('POST', '/api/scenarios/preview',

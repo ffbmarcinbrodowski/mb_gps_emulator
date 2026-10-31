@@ -1,5 +1,5 @@
 """
-Teltonika AVL data encoder (Codec 8) - TCP variant.
+Teltonika AVL data encoder (Codec 8 and Codec 8 Extended) - TCP variant.
 
 Based on the Teltonika Telematics wiki ("Codec 8" / "Teltonika Data Sending Protocols").
 
@@ -36,12 +36,19 @@ AVL record:
         [1] N4 count, then N4 x ([1] id, [4] value)
         [1] N8 count, then N8 x ([1] id, [8] value)
 
+Codec 8 Extended (codec ID 0x8E) is the same, except:
+    - event IO ID, total IO count, the N1/N2/N4/N8 counters and every IO id are 2 bytes,
+    - after N8 comes an NX section for variable-length values (e.g. VIN, fault codes):
+        [2] NX count, then NX x ([2] id, [2] length, [length] value)
+    It is needed for IO ids above 255 (OBD OEM elements of the FMB003) and for NX values.
+
 All integers are big-endian.
 """
 import struct
 from dataclasses import dataclass, field
 
 CODEC_8 = 0x08
+CODEC_8_EXT = 0x8E
 
 # A few common Teltonika IO element IDs (understood by Traccar).
 IO_IGNITION = 239       # 1 byte: 0/1
@@ -71,6 +78,7 @@ class AvlRecord:
     io_2b: dict = field(default_factory=dict)
     io_4b: dict = field(default_factory=dict)
     io_8b: dict = field(default_factory=dict)
+    io_nx: dict = field(default_factory=dict)   # Codec 8 Extended only: {io_id: bytes}
 
 
 def crc16_ibm(data: bytes) -> int:
@@ -92,8 +100,13 @@ def encode_imei(imei: str) -> bytes:
     return struct.pack(">H", len(raw)) + raw
 
 
-def encode_record(r: AvlRecord) -> bytes:
-    """Encode a single AVL record (timestamp + priority + GPS + IO)."""
+def _int(value, size):
+    """Pack an integer of `size` bytes; negative values are sent as two's complement."""
+    return (value & ((1 << 8 * size) - 1)).to_bytes(size, "big")
+
+
+def encode_record(r: AvlRecord, codec=CODEC_8) -> bytes:
+    """Encode a single AVL record (timestamp + priority + GPS + IO) for Codec 8 or 8 Extended."""
     out = struct.pack(">QB", r.timestamp_ms, r.priority)
 
     # GPS element (15 bytes)
@@ -107,23 +120,32 @@ def encode_record(r: AvlRecord) -> bytes:
         max(0, min(65535, round(r.speed_kmh))),
     )
 
-    # IO element
-    total = len(r.io_1b) + len(r.io_2b) + len(r.io_4b) + len(r.io_8b)
-    out += struct.pack(">BB", r.event_io_id, total)
-    for values, fmt in ((r.io_1b, ">B"), (r.io_2b, ">H"), (r.io_4b, ">I"), (r.io_8b, ">Q")):
-        out += struct.pack(">B", len(values))
+    # IO element. Codec 8: ids and counters are 1 byte; Codec 8 Extended: 2 bytes + NX section.
+    ext = codec == CODEC_8_EXT
+    if not ext and (r.io_nx or max([*r.io_1b, *r.io_2b, *r.io_4b, *r.io_8b, r.event_io_id], default=0) > 255):
+        raise ValueError("IO ids above 255 and variable-length IO need Codec 8 Extended")
+    n = 2 if ext else 1
+    groups = ((r.io_1b, 1), (r.io_2b, 2), (r.io_4b, 4), (r.io_8b, 8))
+    total = sum(len(g) for g, _ in groups) + len(r.io_nx)
+    out += _int(r.event_io_id, n) + _int(total, n)
+    for values, size in groups:
+        out += _int(len(values), n)
         for io_id, value in values.items():
-            out += struct.pack(">B", io_id) + struct.pack(fmt, value)
+            out += _int(io_id, n) + _int(value, size)
+    if ext:
+        out += _int(len(r.io_nx), 2)
+        for io_id, value in r.io_nx.items():
+            out += _int(io_id, 2) + _int(len(value), 2) + value
     return out
 
 
-def encode_avl_packet(records: list[AvlRecord]) -> bytes:
-    """Build a complete Codec 8 TCP packet containing `records` (1-255)."""
+def encode_avl_packet(records: list[AvlRecord], codec=CODEC_8) -> bytes:
+    """Build a complete Codec 8 / 8 Extended TCP packet containing `records` (1-255)."""
     if not 1 <= len(records) <= 255:
         raise ValueError("A packet must contain between 1 and 255 records")
 
-    data = struct.pack(">BB", CODEC_8, len(records))
-    data += b"".join(encode_record(r) for r in records)
+    data = struct.pack(">BB", codec, len(records))
+    data += b"".join(encode_record(r, codec) for r in records)
     data += struct.pack(">B", len(records))
 
     return (
@@ -135,8 +157,9 @@ def encode_avl_packet(records: list[AvlRecord]) -> bytes:
 
 def decode_avl_packet(packet: bytes) -> list[dict]:
     """
-    Minimal Codec 8 decoder (used by tools/fake_server.py and for testing).
-    Validates length + CRC and returns the records as dicts.
+    Minimal Codec 8 / 8 Extended decoder (used by tools/fake_server.py and for testing).
+    Validates length + CRC and returns the records as dicts. Values are unsigned;
+    variable-length (NX) values are returned as bytes.
     """
     preamble, length = struct.unpack_from(">II", packet, 0)
     if preamble != 0:
@@ -147,29 +170,37 @@ def decode_avl_packet(packet: bytes) -> list[dict]:
         raise ValueError("CRC mismatch")
 
     codec, count = struct.unpack_from(">BB", data, 0)
-    if codec != CODEC_8:
+    if codec not in (CODEC_8, CODEC_8_EXT):
         raise ValueError(f"Unsupported codec 0x{codec:02x}")
+    n = 2 if codec == CODEC_8_EXT else 1
 
     pos = 2
+
+    def read(size):
+        nonlocal pos
+        value = int.from_bytes(data[pos:pos + size], "big")
+        pos += size
+        return value
+
     records = []
     for _ in range(count):
         ts, prio = struct.unpack_from(">QB", data, pos)
         pos += 9
         lon, lat, alt, angle, sats, speed = struct.unpack_from(">iihHBH", data, pos)
         pos += 15
-        event_id, _total = struct.unpack_from(">BB", data, pos)
-        pos += 2
+        event_id, _total = read(n), read(n)
         io = {}
-        for size, fmt in ((1, ">B"), (2, ">H"), (4, ">I"), (8, ">Q")):
-            (n,) = struct.unpack_from(">B", data, pos)
-            pos += 1
-            for _ in range(n):
-                (io_id,) = struct.unpack_from(">B", data, pos)
-                (value,) = struct.unpack_from(fmt, data, pos + 1)
-                io[io_id] = value
-                pos += 1 + size
+        for size in (1, 2, 4, 8):
+            for _ in range(read(n)):
+                io_id = read(n)
+                io[io_id] = read(size)
+        if codec == CODEC_8_EXT:
+            for _ in range(read(2)):
+                io_id, size = read(2), read(2)
+                io[io_id] = data[pos:pos + size]
+                pos += size
         records.append({
-            "timestamp_ms": ts, "priority": prio,
+            "codec": codec, "timestamp_ms": ts, "priority": prio,
             "lat": lat / 1e7, "lon": lon / 1e7, "altitude": alt,
             "angle": angle, "satellites": sats, "speed_kmh": speed,
             "event_io_id": event_id, "io": io,

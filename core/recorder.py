@@ -68,7 +68,12 @@ class RecordBuilder:
         self.rng = rng or random.Random()
         self.gsm = 5     # GSM signal 0-5, changes slowly
 
-    def build(self, fix, timestamp_ms, odometer_m, trip_odometer_m, event=None, event_io_id=0):
+    def build(self, fix, timestamp_ms, odometer_m, trip_odometer_m, event=None, event_io_id=0,
+              extra_io=None, weak_battery=False):
+        """
+        extra_io: more IO elements, e.g. OBD values {"1b": {...}, "2b": {...}, "4b": {...}, "nx": {...}}.
+        weak_battery: a weak car battery shows as low voltage while the engine is off.
+        """
         e = event or {}
         ignition = e.get("ignition", int(fix["ignition"]))
         speed = e.get("speed", fix["speed_kmh"])
@@ -88,7 +93,7 @@ class RecordBuilder:
                 IO_GSM_SIGNAL: self.gsm,
             },
             io_2b={
-                IO_EXTERNAL_VOLTAGE: e.get("external_voltage", self._voltage_mv(ignition)),
+                IO_EXTERNAL_VOLTAGE: e.get("external_voltage", self._voltage_mv(ignition, weak_battery)),
                 IO_PDOP: round(fix["pdop"] * 10),
                 IO_HDOP: round(fix["hdop"] * 10),
             },
@@ -97,14 +102,21 @@ class RecordBuilder:
                 IO_TRIP_ODOMETER: int(trip_odometer_m),
             },
         )
-        if event:
+        for group, target in (("1b", record.io_1b), ("2b", record.io_2b), ("4b", record.io_4b),
+                              ("8b", record.io_8b), ("nx", record.io_nx)):
+            target.update((extra_io or {}).get(group, {}))
+        if event and "obd_action" not in event:
             # Overspeed (IO 255) carries the speed itself, the others their fixed value.
+            # (OBD events carry their values in extra_io.)
             record.io_1b[event["io_id"]] = round(speed) if event["value"] is None else event["value"]
         return record
 
-    def _voltage_mv(self, ignition):
-        """Car battery: ~14 V while the engine runs (alternator), ~12.5 V when off."""
+    def _voltage_mv(self, ignition, weak_battery=False):
+        """Car battery: ~14 V while the engine runs (alternator), ~12.5 V when off (~11.7 V if weak)."""
         if not self.realistic:
             return 12_600
-        base = 14_050 if ignition else 12_500
+        if ignition:
+            base = 14_050
+        else:
+            base = 11_700 if weak_battery else 12_500
         return int(base + self.rng.gauss(0, 50))
