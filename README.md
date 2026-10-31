@@ -79,6 +79,22 @@ docker compose down           # stop (data is kept)
 git pull && docker compose up -d --build   # update
 ```
 
+### Updating on a NAS (e.g. QNAP Container Station)
+
+`update.sh` updates the container in one step: it checks GitHub for a new version, backs up
+`data/emulator.db` to `data/backup/` (the last 10 backups are kept), updates the code, rebuilds and
+restarts the container and waits for its health check. It needs no git on the NAS (git then runs in an
+`alpine/git` container) and finds Container Station's `docker` even if it is not in `PATH`.
+
+```bash
+cd /share/Container/mb_gps_emulator   # the folder with docker-compose.yml
+sh update.sh                          # only does something if there is a new version
+sh update.sh --force                  # rebuild anyway
+```
+
+For a private repository, put a GitHub token with read access to the repository into `.github_token`
+next to the script (`chmod 600 .github_token`). It is git-ignored and never copied into the image.
+
 The database lives on the host in `./data/emulator.db`. To back it up, copy that file.
 
 > **The server address `127.0.0.1` inside Docker means the container itself.**
