@@ -20,6 +20,7 @@ It comes with two interfaces on top of the same core:
 
 - **Devices:** add, edit and delete virtual trackers (name, IMEI, route, send interval, average speed, target server).
 - **Routes:** click start and end on the map. The route comes from the GraphHopper Routing API and you can drag the markers to change it.
+- **Stops:** a route can have any number of stops between start and end, each with its own waiting time (engine running). A stop with 0 minutes is only driven through, which forces a particular road.
 - **Emulation:** start or stop one device or all of them.
 - **Scenarios:** let devices drive on a schedule, day after day, e.g. twice a day to work and back,
   every hour there and back, or back and forth all day. Between trips they stand parked with the
@@ -119,7 +120,9 @@ The database lives on the host in `./data/emulator.db`. To back it up, copy that
 
 The free plan includes a limited number of requests per day. The emulator calls GraphHopper
 only when you create a route, not while devices are driving, so the free plan is usually
-enough for testing. Check GraphHopper's current pricing and terms for the exact limits and
+enough for testing. The free plan also allows only 5 points per route (start, 3 stops, end).
+Routes with more stops are requested in parts automatically, one request per 4 legs. If your
+plan allows more points, set `GRAPHHOPPER_MAX_POINTS`. Check GraphHopper's current pricing and terms for the exact limits and
 allowed use.
 
 ## Usage
@@ -130,6 +133,11 @@ allowed use.
      unused IMEI from the test range `00…`, which is never assigned to real devices, so it can't
      clash with a real tracker on a shared server.
    - Click the map once for the **start** point and once more for the **end** point. The route appears automatically.
+   - **Stops:** every further click adds a new end, and the previous end becomes a numbered stop.
+     Set the waiting time of each stop in minutes (default 5). The vehicle stops there with the
+     engine running, so Traccar sees one trip with stops. **0 min** means it only drives through
+     the point, which is handy for forcing a particular road. Drag the markers to move points,
+     click **✕** to remove a stop, or the **✕** next to *End* to make the last stop the end again.
    - Set the interval (seconds between records while driving), the **max speed** of the vehicle
      (e.g. 130 for a car, 80 for a truck) and the server, then click **Save**.
    - **Realistic driving** is on by default. Switch it off for a simple constant-speed drive,
@@ -155,7 +163,8 @@ and drives at the planned times until you click **Stop**.
 - **Direction:** every departure drives to the other end of the route (A → B, then B → A).
   A *round trip* always starts at A, waits at B and comes back.
 - **Return route:** B → A has its own route from GraphHopper, because one-way streets and
-  motorway exits differ. On the map it is the orange dashed line.
+  motorway exits differ. On the map it is the orange dashed line. It always goes straight back
+  to the start, without the stops.
 - **Parked:** between trips the vehicle stands with the ignition off and sends one record every
   5 minutes, like a parked Teltonika tracker. Events such as towing or power cut work while parked.
 - **Random ±:** shifts each departure by a few minutes, so the vehicle doesn't leave to the second.
@@ -326,6 +335,7 @@ docker compose exec emulator python tools/fake_server.py     # inside the contai
 |---|---|---|
 | `GRAPHHOPPER_API_KEY` | – | GraphHopper API key (required for routing) |
 | `GRAPHHOPPER_ROUTE_URL` | `https://graphhopper.com/api/1/route` | Routing endpoint; also works with a self-hosted GraphHopper |
+| `GRAPHHOPPER_MAX_POINTS` | `5` | Points per routing request your plan allows (free plan: 5); routes with more stops are requested in parts |
 | `EMULATOR_PORT` | `5057` | Web port |
 | `EMULATOR_HOST` | `0.0.0.0` | Bind address |
 | `EMULATOR_TIMEZONE` | the computer's zone (UTC in Docker) | Time zone of scenario times, e.g. `Europe/Berlin` |
@@ -341,6 +351,7 @@ More constants are in `config.py`: speed variation, TCP timeout and the routing 
   - **Acceleration and braking:** the driver accelerates at up to 1.6 m/s². Looking ~500 m ahead, the driver brakes smoothly (about 2–3 m/s²) for curves, lower limits, stops and the end of the route.
   - **Curves:** curve speed comes from the curve radius (v = √(a·r) with 2.5 m/s² sideways), so a 90° junction turn is taken at ~25 km/h.
   - **Traffic stops:** random stops of 8–50 s, about 1 per km on town roads and rarer on faster roads. Sharp town turns often mean a stop.
+  - **Planned stops:** the vehicle brakes to a stop at each stop of the route and waits there for the set time with the engine running (records every *interval* seconds, frozen position), then drives on.
   - **Ignition:** ignition on and 30–90 s idling before driving off, 15–45 s idling and ignition off at the destination.
   - **GPS:** slowly changing position error of ~2–5 m, varying satellites and HDOP. The position is frozen while standing ("static navigation", as on Teltonika).
 - **Records** (`core/recorder.py`, modelled on Teltonika FMB data acquisition): while the ignition is on, a record is saved every *interval* seconds, on a heading change of ≥ 10° and on a speed change of ≥ 10 km/h. Every ignition change is an event record (IO 239).
@@ -368,9 +379,9 @@ section of variable-length values (VIN, fault codes).
 |---|---|---|
 | GET, POST | `/api/servers` | List / create `{name, host, port}` |
 | GET, PUT, DELETE | `/api/servers/<id>` | Read / update / delete |
-| GET, POST | `/api/devices` | List / create a device |
+| GET, POST | `/api/devices` | List / create a device (route: `start`, `end`, optional `stops: [{point: [lat, lon], dwell_min: 5}, ...]`) |
 | GET, PUT, DELETE | `/api/devices/<id>` | Read (incl. route points) / update / delete |
-| POST | `/api/routes` | `{start: [lat, lon], end: [lat, lon]}` → route preview |
+| POST | `/api/routes` | `{start: [lat, lon], end: [lat, lon], via: [[lat, lon], ...]}` → route preview through the stops |
 | GET | `/api/routes/<id>` | Saved route |
 | POST | `/api/emulator/start` | `{device_id: 1}` or `{all: true}` |
 | POST | `/api/emulator/stop` | `{device_id: 1}` or `{all: true}` |

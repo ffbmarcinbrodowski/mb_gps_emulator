@@ -91,11 +91,18 @@
               <label for="fStart"><span class="dot dot-start"></span>Start</label>
               <input class="form-control form-control-sm" id="fStart" placeholder="click on the map" required>
             </div>
-            <div class="form-row-label">
+            <!-- Stops between start and end (filled by deviceForm.js) -->
+            <div id="stopRows"></div>
+            <div class="form-row-label stop-row">
               <label for="fEnd"><span class="dot dot-end"></span>End</label>
               <input class="form-control form-control-sm" id="fEnd" placeholder="click on the map" required>
+              <button type="button" class="btn btn-sm stop-remove d-none" id="btnRemoveEnd"
+                      title="Remove the end – the last stop becomes the end"><i class="bi bi-x-lg"></i></button>
             </div>
-            <div class="small text-secondary mb-2 ms-1" id="routeInfo">Click the map to set the start, then the end point.</div>
+            <div class="form-text mt-0 mb-1 ms-1 d-none" id="stopsHelp">
+              Waiting time at each stop (engine running) · 0 min = only drive through.
+            </div>
+            <div class="small text-secondary mb-2 ms-1" id="routeInfo"></div>
             <div class="form-row-label">
               <label for="fInterval">Interval</label>
               <div class="input-group input-group-sm">

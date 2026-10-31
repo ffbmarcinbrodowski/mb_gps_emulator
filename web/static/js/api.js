@@ -39,11 +39,11 @@ export const api = {
     check: (obd) => request('POST', '/api/obd/check', obd),
   },
   scenarios: {
-    preview: (scenario, durationS, deviceId) => request('POST', '/api/scenarios/preview',
-      { scenario, duration_s: durationS, device_id: deviceId }),
+    preview: (scenario, durationS, deviceId, stopsS = 0) => request('POST', '/api/scenarios/preview',
+      { scenario, duration_s: durationS, device_id: deviceId, stops_s: stopsS }),
   },
   routes: {
-    generate: (start, end) => request('POST', '/api/routes', { start, end }),
+    generate: (start, end, via = []) => request('POST', '/api/routes', { start, end, via }),
   },
   emulator: {
     start: (deviceId) => request('POST', '/api/emulator/start', { device_id: deviceId }),

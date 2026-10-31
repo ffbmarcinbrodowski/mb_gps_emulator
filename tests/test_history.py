@@ -15,7 +15,7 @@ OBD_DEVICE = {**DEVICE, "obd_enabled": 1, "vin": "WVWZZZ1KZ9W000123", "obd_odome
               "obd_coolant_c": 15.0, "obd_weak_battery": 0}
 POINTS = straight_route()
 ROUTE = {"points": json.dumps(POINTS), "profile": json.dumps(PROFILE), "duration_s": 300,
-         "return_points": json.dumps(list(reversed(POINTS))), "return_profile": json.dumps(PROFILE)}
+         "return_points": json.dumps(list(reversed(POINTS))), "return_profile": json.dumps(PROFILE), "stops": None}
 COMMUTE = {"type": "times", "times": ["07:30", "16:30"], "days": scenarios.ALL_DAYS, "jitter_min": 5}
 
 
@@ -75,6 +75,21 @@ class HistoryTest(unittest.TestCase):
         _b, again = generate(COMMUTE, days=1, seed=5)
         self.assertEqual([(r.timestamp_ms, r.lat, r.lon) for r in first],
                          [(r.timestamp_ms, r.lat, r.lon) for r in again])
+
+
+class HistoryStopsTest(unittest.TestCase):
+    def test_stop_lengthens_the_trip_with_the_engine_running(self):
+        def first_trip(route):
+            sim = HistorySimulator(DEVICE, route, {**COMMUTE, "jitter_min": 0}, seed=1)
+            start = datetime(2026, 10, 19, 0, 0, tzinfo=TZ)
+            records = list(sim.records(start, start + timedelta(hours=12)))
+            ignition = [r.timestamp_ms for r in records if r.event_io_id == IO_IGNITION]
+            return ignition[:2]           # ignition on / off of the 07:30 trip
+
+        plain = first_trip(ROUTE)
+        with_stop = first_trip({**ROUTE, "stops": json.dumps([{"lat": 0, "lon": 0, "dwell_min": 20, "index": 20}])})
+        # No extra ignition events: the engine runs at the stop. The trip takes ~20 min longer.
+        self.assertGreater(with_stop[1] - with_stop[0], plain[1] - plain[0] + 19 * 60_000)
 
 
 if __name__ == "__main__":

@@ -299,7 +299,7 @@ class MainWindow(QMainWindow):
         full = models.get_device(self.db, d["id"])
         route = full["route"]
         self.map.show_route(route["points"], route["start"], route["end"], fit=fit_route,
-                            return_points=route["return_points"])
+                            return_points=route["return_points"], stops=route["stops"])
 
     def _update_actions(self):
         d = self._selected()

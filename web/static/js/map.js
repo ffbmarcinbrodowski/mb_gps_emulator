@@ -25,6 +25,17 @@ export function endpointMarker(latlng, kind, draggable = false) {
   return L.marker(latlng, { icon, draggable, title: kind === 'start' ? 'Start' : 'End' });
 }
 
+// Numbered blue marker for a stop between start and end.
+export function stopMarker(latlng, number, draggable = false) {
+  const icon = L.divIcon({
+    className: '',
+    html: `<div class="stop-marker">${number}</div>`,
+    iconSize: [20, 20],
+    iconAnchor: [10, 10],
+  });
+  return L.marker(latlng, { icon, draggable, title: `Stop ${number}` });
+}
+
 export function routeLine(points) {
   return L.polyline(points.map((p) => [p[0], p[1]]), { color: '#1e88e5', weight: 4, opacity: 0.8 });
 }

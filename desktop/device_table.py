@@ -43,6 +43,9 @@ class DeviceTableModel(QAbstractTableModel):
             if col == 0:
                 mode = "realistic" if d["realistic"] else "simple"
                 text = f"IMEI {d['imei']}\nOdometer {d['odometer_m'] / 1000:.1f} km\n{mode} driving, max {d['speed_kmh']:.0f} km/h"
+                if d["route"] and d["route"]["stops"]:
+                    stops = d["route"]["stops"]
+                    text += f"\nRoute: {d['route']['distance_m'] / 1000:.1f} km, {len(stops)} stop{'s' if len(stops) > 1 else ''}"
                 if d["obd"]["enabled"]:
                     o = d["obd"]
                     service = f"service in {o['service_km']:,.0f} km" if o["service_km"] > 0 else "service due"

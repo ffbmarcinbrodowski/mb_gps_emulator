@@ -2,10 +2,10 @@
 "New device" / "Edit device" dialog: form on the left, route picker map on the right
 (same workflow as the web UI: click start, click end, drag to adjust).
 """
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit,
-    QMessageBox, QPushButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget,
+    QMessageBox, QPushButton, QScrollArea, QSpinBox, QToolButton, QVBoxLayout, QWidget,
 )
 
 from core import database, models, services
@@ -15,7 +15,9 @@ from .obd_dialog import ObdDialog, summary as obd_summary
 from .scenario_widget import ScenarioDialog, summary
 from .tasks import error_text, run_async
 
-HINT = "Click the map to set the start, then the end point."
+HINT = ("Click the map to set the start, then the end. Every further click adds a new end - "
+        "the previous end becomes a stop.")
+DEFAULT_DWELL_MIN = 5   # waiting time of a new stop
 
 
 def parse_lat_lon(text):
@@ -32,6 +34,10 @@ def fmt_point(point):
     return f"{point[0]:.6f}, {point[1]:.6f}" if point else ""
 
 
+def fmt_minutes(minutes):
+    return f"{minutes} min" if minutes < 60 else f"{minutes // 60} h {minutes % 60} min"
+
+
 class DeviceDialog(QDialog):
     saved = Signal(dict)   # the saved device
 
@@ -43,6 +49,9 @@ class DeviceDialog(QDialog):
         self.device_id = device_id
         self.start = None        # [lat, lon]
         self.end = None
+        self.stops = []          # between start and end, in driving order: [{"point": [lat, lon], "dwell_min"}]
+        self.stop_rows = []      # (coordinates edit, waiting time spin box) of every stop row
+        self._saved_distance_m = None   # length of the saved route (edit), shown until a new preview
         self.preview = None      # route generated in this dialog
         self.saved_duration_s = 0  # duration of the saved route (edit), for the scenario preview
         self.scenario = None       # scenario saved with the device (None = manual)
@@ -54,6 +63,7 @@ class DeviceDialog(QDialog):
         self.setWindowTitle("Edit device" if device_id else "New device")
         self.resize(1150, 680)
         self._build_ui()
+        self._build_stop_rows()
         self._load_servers()
         if device_id:
             self._load_device(device_id)
@@ -85,7 +95,19 @@ class DeviceDialog(QDialog):
         self.start_edit.editingFinished.connect(lambda: self._typed_point("start"))
         self.end_edit.editingFinished.connect(lambda: self._typed_point("end"))
         form.addRow("🟢 Start", self.start_edit)
-        form.addRow("🔴 End", self.end_edit)
+        # Stop rows are inserted below the start row (see _build_stop_rows).
+        self.form = form
+        self.stops_row = form.rowCount()
+        self.remove_end_btn = self._remove_button("Remove the end - the last stop becomes the end")
+        self.remove_end_btn.clicked.connect(self._remove_end)
+        end_row = QHBoxLayout()
+        end_row.addWidget(self.end_edit, 1)
+        end_row.addWidget(self.remove_end_btn)
+        form.addRow("🔴 End", end_row)
+        self.stops_help = QLabel("Waiting time at each stop (engine running) · 0 min = only drive through.")
+        self.stops_help.setWordWrap(True)
+        self.stops_help.setStyleSheet("color: #666; font-size: 11px;")
+        form.addRow("", self.stops_help)
         self.route_info = QLabel(HINT)
         self.route_info.setWordWrap(True)
         form.addRow("", self.route_info)
@@ -187,6 +209,14 @@ class DeviceDialog(QDialog):
         layout.addLayout(buttons)
 
     @staticmethod
+    def _remove_button(tooltip):
+        button = QToolButton()
+        button.setText("✕")
+        button.setToolTip(tooltip)
+        button.setAutoRaise(True)
+        return button
+
+    @staticmethod
     def _section(title):
         label = QLabel(title)
         label.setStyleSheet("font-weight: 600; color: #555; margin-top: 10px;")
@@ -227,22 +257,111 @@ class DeviceDialog(QDialog):
         if d["route"]:
             self.saved_duration_s = d["route"]["duration_s"]
             self.start, self.end = d["route"]["start"], d["route"]["end"]
+            self.stops = [dict(s) for s in d["route"]["stops"]]
+            self._build_stop_rows()
             self._show_points()
             self.map.show_route(d["route"]["points"], fit=True)
-            self.route_info.setText(f"{d['route']['distance_m'] / 1000:.1f} km · saved route")
+            self._saved_distance_m = d["route"]["distance_m"]
+            self._show_route_summary()
 
     # --- Route picking -----------------------------------------------------------
 
     def _map_clicked(self, lat, lon):
         if self.start is None:
             self.start = [lat, lon]
+        elif self.end is None:
+            self.end = [lat, lon]
         else:
-            self.end = [lat, lon]   # first click after start = end, later clicks move the end
+            # The last point is always the end: the previous end becomes a stop.
+            self.stops.append({"point": self.end, "dwell_min": DEFAULT_DWELL_MIN})
+            self.end = [lat, lon]
+            self._build_stop_rows()
         self._points_changed()
 
     def _marker_moved(self, kind, lat, lon):
-        setattr(self, kind, [lat, lon])
+        if kind.startswith("stop:"):
+            self.stops[int(kind[5:])]["point"] = [lat, lon]
+        else:
+            setattr(self, kind, [lat, lon])
         self._points_changed()
+
+    # --- Stops ---------------------------------------------------------------------------
+
+    def _build_stop_rows(self):
+        """One form row per stop: coordinates, waiting time, remove button."""
+        for _ in self.stop_rows:
+            self.form.removeRow(self.stops_row)
+        self.stop_rows = []
+        for i, stop in enumerate(self.stops):
+            edit = QLineEdit(fmt_point(stop["point"]))
+            edit.editingFinished.connect(lambda i=i: self._typed_stop(i))
+            dwell = QSpinBox()
+            dwell.setRange(0, 720)
+            dwell.setSuffix(" min")
+            dwell.setValue(stop["dwell_min"])
+            dwell.setToolTip("Waiting time (0 = only drive through)")
+            dwell.valueChanged.connect(lambda value, i=i: self._dwell_changed(i, value))
+            remove = self._remove_button("Remove stop")
+            # Removing rebuilds the rows (and deletes this button) - do it after the click is handled.
+            remove.clicked.connect(lambda _=False, i=i: QTimer.singleShot(0, lambda: self._remove_stop(i)))
+            row = QHBoxLayout()
+            row.addWidget(edit, 1)
+            row.addWidget(dwell)
+            row.addWidget(remove)
+            self.form.insertRow(self.stops_row + i, f"🔵 Stop {i + 1}", row)
+            self.stop_rows.append((edit, dwell))
+        self.remove_end_btn.setVisible(bool(self.stops))
+        self.stops_help.setVisible(bool(self.stops))
+
+    def _typed_stop(self, i):
+        if i >= len(self.stop_rows) or i >= len(self.stops):
+            return    # the row is being removed
+        edit = self.stop_rows[i][0]
+        if edit.text() == fmt_point(self.stops[i]["point"]):
+            return
+        point = parse_lat_lon(edit.text())
+        if point is None:
+            self._show_error('Invalid stop coordinates - use "lat, lon"')
+            return
+        self.stops[i]["point"] = point
+        self.map.center(point)
+        self._points_changed()
+
+    def _dwell_changed(self, i, value):
+        # Only the waiting time changed - the route stays the same.
+        self.stops[i]["dwell_min"] = value
+        self._show_route_summary()
+
+    def _remove_stop(self, i):
+        if not self._alive or i >= len(self.stops):
+            return
+        del self.stops[i]
+        self._build_stop_rows()
+        self._points_changed()
+
+    def _remove_end(self):
+        """The last stop becomes the end."""
+        if self.stops:
+            self.end = self.stops.pop()["point"]
+            QTimer.singleShot(0, self._build_stop_rows)
+            self._points_changed()
+
+    def _stops_minutes(self):
+        return sum(s["dwell_min"] for s in self.stops)
+
+    def _show_route_summary(self):
+        """"15.5 km · ~33 min by car · 2 stops, 15 min waiting" """
+        if self.preview:
+            text = f"{self.preview['distance_m'] / 1000:.1f} km · ~{round(self.preview['duration_s'] / 60)} min by car"
+        elif self._saved_distance_m is not None:
+            text = f"{self._saved_distance_m / 1000:.1f} km · saved route"
+        else:
+            return
+        if self.stops:
+            n = len(self.stops)
+            text += f" · {n} stop{'s' if n > 1 else ''}, {fmt_minutes(self._stops_minutes())} waiting"
+        self.route_info.setStyleSheet("")
+        self.route_info.setText(text)
 
     def _typed_point(self, kind):
         edit = self.start_edit if kind == "start" else self.end_edit
@@ -258,15 +377,22 @@ class DeviceDialog(QDialog):
 
     def _reset_points(self):
         self.start = self.end = self.preview = None
+        self._saved_distance_m = None
+        self.stops = []
+        self._build_stop_rows()
         self._route_request += 1
+        self._set_busy(False)
         self.map.clear_route()
         self._show_points()
+        self.route_info.setStyleSheet("")
         self.route_info.setText(HINT)
 
     def _show_points(self):
         self.start_edit.setText(fmt_point(self.start))
         self.end_edit.setText(fmt_point(self.end))
-        self.map.set_picker(self.start, self.end)
+        for (edit, _dwell), stop in zip(self.stop_rows, self.stops):
+            edit.setText(fmt_point(stop["point"]))
+        self.map.set_picker(self.start, self.end, [s["point"] for s in self.stops])
 
     def _points_changed(self):
         self._show_error(None)
@@ -277,11 +403,11 @@ class DeviceDialog(QDialog):
     def _generate_route(self):
         self._route_request += 1
         request = self._route_request
-        start, end = self.start, self.end
+        start, end, via = self.start, self.end, [s["point"] for s in self.stops]
         self.route_info.setStyleSheet("")
         self.route_info.setText("Generating route…")
         self._set_busy(True)
-        run_async(lambda: services.generate_route(start, end),
+        run_async(lambda: services.generate_route(start, end, via),
                   lambda route, error: self._route_ready(request, route, error))
 
     def _route_ready(self, request, route, error):
@@ -296,8 +422,7 @@ class DeviceDialog(QDialog):
             return
         self.preview = route
         self.map.show_route(route["points"])
-        minutes = round(route["duration_s"] / 60)
-        self.route_info.setText(f"{route['distance_m'] / 1000:.1f} km · ~{minutes} min by car")
+        self._show_route_summary()
 
     # --- Scenario ------------------------------------------------------------------------
 
@@ -307,7 +432,7 @@ class DeviceDialog(QDialog):
 
     def _edit_scenario(self):
         duration = (self.preview or {}).get("duration_s") or self.saved_duration_s
-        dialog = ScenarioDialog(self, self.scenario, duration, self.device_id)
+        dialog = ScenarioDialog(self, self.scenario, duration, self.device_id, self._stops_minutes() * 60)
         if dialog.exec() == QDialog.Accepted:
             self._set_scenario(dialog.scenario)
 
@@ -351,6 +476,7 @@ class DeviceDialog(QDialog):
             "server_id": self.server.currentData(),
             "start": self.start,
             "end": self.end,
+            "stops": [{"point": s["point"], "dwell_min": s["dwell_min"]} for s in self.stops],
         }
         # Send the previewed route so GraphHopper is not called twice.
         if self.preview:

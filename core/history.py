@@ -19,7 +19,7 @@ import threading
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from . import config, database, scenarios
+from . import config, database, models, scenarios
 from .motion import GpsReceiver, Parked, Trip
 from .obd import ObdUnit
 from .recorder import RecordBuilder, RecordPolicy
@@ -40,8 +40,9 @@ class HistorySimulator:
         self.realistic = bool(device["realistic"])
         self.max_speed = device["speed_kmh"]
         self.route_duration = route["duration_s"]
+        self.stops_s = models.stops_seconds(route)
         self.rng = random.Random(f"history|{seed}")    # same input -> same history
-        self.legs = {"forward": _leg(route, "forward"), "return": _leg(route, "return")}
+        self.legs = {"forward": models.route_leg(route, "forward"), "return": models.route_leg(route, "return")}
         self.gps = GpsReceiver(self.realistic, self.rng)
         self.policy = RecordPolicy(max(1, device["interval_s"]), self.realistic)
         self.builder = RecordBuilder(self.realistic, self.rng)
@@ -65,7 +66,7 @@ class HistorySimulator:
         self.start_ts, self.end_ts = start.timestamp(), end.timestamp()
         self.t = self.obd_t = self.start_ts
         other = {"A": "B", "B": "A"}
-        leg_s = scenarios.leg_seconds(self.route_duration)
+        leg_s = scenarios.leg_seconds(self.route_duration, self.stops_s)
         location, drive_now = scenarios.initial_position(self.cfg, start, leg_s, self.seed)
 
         while self.t < self.end_ts and not cancelled():
@@ -89,8 +90,8 @@ class HistorySimulator:
                 yield from self._park(location, min(self.t + dwell, self.end_ts))
 
     def _drive(self, direction):
-        points, profile = self.legs[direction]
-        trip = Trip(points, profile, self.max_speed, self.realistic, rng=self.rng)
+        points, profile, stops = self.legs[direction]
+        trip = Trip(points, profile, self.max_speed, self.realistic, rng=self.rng, stops=stops)
         trip_start = self.odometer
         while not trip.finished and self.t < self.end_ts:
             self.t += 1.0
@@ -106,7 +107,7 @@ class HistorySimulator:
 
     def _park(self, location, until):
         """Parked with the ignition off: jump from heartbeat to heartbeat instead of second by second."""
-        points, _profile = self.legs["forward"]
+        points, _profile, _stops = self.legs["forward"]
         heading = self.fix["heading"] if self.fix else 0.0
         parked = Parked(points[-1] if location == "B" else points[0], heading, realistic=self.realistic)
         if self.obd:
@@ -134,16 +135,6 @@ class HistorySimulator:
                                     weak_battery=bool(self.obd and self.obd.state.weak_battery))
         self.policy.saved(self.fix, self.t)
         return record
-
-
-def _leg(route, direction):
-    """Points and road profile of A -> B or B -> A (reversed A -> B for old data without a return route)."""
-    if direction == "return":
-        if route["return_points"]:
-            profile = json.loads(route["return_profile"]) if route["return_profile"] else None
-            return json.loads(route["return_points"]), profile
-        return list(reversed(json.loads(route["points"]))), None
-    return json.loads(route["points"]), json.loads(route["profile"]) if route["profile"] else None
 
 
 class HistoryJob(threading.Thread):

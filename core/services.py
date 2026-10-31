@@ -83,7 +83,33 @@ def parse_device(db, data):
         "obd": parse_obd(data.get("obd")),
         "start": _point(data, "start"),
         "end": _point(data, "end"),
+        "stops": parse_stops(data.get("stops")),
     }
+
+
+MAX_STOPS = 20
+
+
+def parse_stops(value):
+    """
+    Stops between start and end, in driving order: [{"point": [lat, lon], "dwell_min": 5}, ...].
+    dwell_min = how long the vehicle waits there (engine running); 0 = it only drives through.
+    """
+    if not value:
+        return []
+    if not isinstance(value, list):
+        raise ServiceError("Invalid stops")
+    if len(value) > MAX_STOPS:
+        raise ServiceError(f"At most {MAX_STOPS} stops")
+    stops = []
+    for n, stop in enumerate(value, 1):
+        if not isinstance(stop, dict):
+            raise ServiceError("Invalid stops")
+        point = _point({f"stop {n}": stop.get("point")}, f"stop {n}")
+        dwell = stop.get("dwell_min") if stop.get("dwell_min") not in (None, "") else 0
+        stops.append({"point": point, "dwell_min": _number({f"stop {n} waiting time": dwell},
+                                                           f"stop {n} waiting time", 0, 720, int)})
+    return stops
 
 
 def parse_scenario(value):
@@ -185,12 +211,13 @@ def new_vin():
 
 
 def scenario_preview(data):
-    """Upcoming departures of a scenario for the UI (data: {scenario, duration_s})."""
+    """Upcoming departures of a scenario for the UI (data: {scenario, duration_s, stops_s})."""
     cfg = parse_scenario(data.get("scenario"))
     if cfg is None:
         return {"timezone": config.TIMEZONE, "scenario": None, "trips": [], "warnings": []}
     now = datetime.now(ZoneInfo(config.TIMEZONE))
-    leg_s = scenarios.leg_seconds(float(data.get("duration_s") or 0))
+    # stops_s: waiting time at the stops of the route, part of every A -> B drive
+    leg_s = scenarios.leg_seconds(float(data.get("duration_s") or 0), float(data.get("stops_s") or 0))
     trips, warnings = scenarios.preview(cfg, now, leg_s, seed=data.get("device_id") or 0)
     return {
         "timezone": config.TIMEZONE,
@@ -202,27 +229,35 @@ def scenario_preview(data):
 
 # --- Routes -----------------------------------------------------------------
 
-def generate_route(start, end):
-    """Route preview between two [lat, lon] points (GraphHopper)."""
+def generate_route(start, end, via=()):
+    """Route preview between two [lat, lon] points, through the `via` points in between (GraphHopper)."""
     start = _point({"start": start}, "start")
     end = _point({"end": end}, "end")
+    via = [_point({"stop": p}, "stop") for p in via or []]
+    if len(via) > MAX_STOPS:
+        raise ServiceError(f"At most {MAX_STOPS} stops")
     try:
-        return graphhopper.generate_route(start, end)
+        return graphhopper.generate_route(start, end, via=via)
     except graphhopper.RoutingError as exc:
         raise ServiceError(str(exc), 502)
 
 
-def _route_for(data, start, end):
+def _route_for(data, start, end, stops):
     """Use the route already generated in the UI (preview) or ask GraphHopper now."""
     route = data.get("route")
     if route and isinstance(route.get("points"), list) and len(route["points"]) >= 2:
-        return {
-            "points": route["points"],
-            "distance_m": float(route.get("distance_m") or 0),
-            "duration_s": float(route.get("duration_s") or 0),
-            "profile": route.get("profile") if isinstance(route.get("profile"), dict) else None,
-        }
-    return generate_route(start, end)
+        indices = route.get("stop_indices") or []
+        # A preview made for other stops (or by an older UI) can't say where the stops are.
+        if (len(indices) == len(stops)
+                and all(isinstance(i, int) and 0 <= i < len(route["points"]) for i in indices)):
+            return {
+                "points": route["points"],
+                "distance_m": float(route.get("distance_m") or 0),
+                "duration_s": float(route.get("duration_s") or 0),
+                "profile": route.get("profile") if isinstance(route.get("profile"), dict) else None,
+                "stop_indices": indices,
+            }
+    return generate_route(start, end, [s["point"] for s in stops])
 
 
 # --- Servers ----------------------------------------------------------------
@@ -252,11 +287,12 @@ def create_device(db, data):
     if models.imei_taken(db, device["imei"]):
         raise ServiceError("A device with this IMEI already exists", 409)
 
-    route = _route_for(data, device["start"], device["end"])
+    route = _route_for(data, device["start"], device["end"], device["stops"])
     # Scenarios drive back and forth: B -> A gets its own route (one-way streets differ).
+    # It goes straight back, without the stops.
     return_route = generate_route(device["end"], device["start"]) if device["scenario"] else None
     device_id = models.create_device(db, device)
-    models.save_route(db, device_id, device["start"], device["end"], route, return_route)
+    models.save_route(db, device_id, device["start"], device["end"], route, return_route, device["stops"])
     db.commit()
     return models.get_device(db, device_id)
 
@@ -270,13 +306,15 @@ def update_device(db, emulator, device_id, data):
         raise ServiceError("A device with this IMEI already exists", 409)
 
     old = existing["route"]
-    route_changed = old is None or old["start"] != device["start"] or old["end"] != device["end"]
+    stop_points = [s["point"] for s in device["stops"]]
+    route_changed = (old is None or old["start"] != device["start"] or old["end"] != device["end"]
+                     or [s["point"] for s in old["stops"]] != stop_points)
     # Routes created before realistic driving have no road speed profile -> fetch it once.
     needs_profile = device["realistic"] and old is not None and not old["has_profile"]
     # Generate a new route before touching anything, so a routing error changes nothing.
     new_route = None
     if route_changed or needs_profile or data.get("route"):
-        new_route = _route_for(data, device["start"], device["end"])
+        new_route = _route_for(data, device["start"], device["end"], device["stops"])
     needs_return = device["scenario"] and (new_route is not None or not old["has_return"])
     return_route = generate_route(device["end"], device["start"]) if needs_return else None
 
@@ -287,9 +325,13 @@ def update_device(db, emulator, device_id, data):
 
     models.update_device(db, device_id, device)
     if new_route:
-        models.save_route(db, device_id, device["start"], device["end"], new_route, return_route)
-    elif return_route:
-        models.set_return_route(db, device_id, return_route)
+        models.save_route(db, device_id, device["start"], device["end"], new_route, return_route,
+                          device["stops"])
+    else:
+        # Same stops, maybe other waiting times - the route itself stays.
+        models.set_stop_dwell(db, device_id, device["stops"])
+        if return_route:
+            models.set_return_route(db, device_id, return_route)
     if not device["scenario"]:
         models.set_armed(db, device_id, False)
     db.commit()

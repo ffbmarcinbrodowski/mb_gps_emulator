@@ -18,7 +18,7 @@ map.on('click', (e) => bridge && bridge.mapClicked(e.latlng.lat, e.latlng.lng));
 
 const deviceMarkers = {};   // device id -> marker
 let routeLayer = null;      // route polyline + start/end dots
-const picker = { start: null, end: null };
+const picker = { start: null, end: null, stops: [] };
 
 function dotIcon(color) {
   return L.divIcon({
@@ -31,6 +31,19 @@ function dotIcon(color) {
 }
 const START_COLOR = '#4caf50';
 const END_COLOR = '#e53935';
+const STOP_COLOR = '#1e88e5';
+
+// Numbered blue marker for a stop between start and end.
+function stopIcon(number) {
+  return L.divIcon({
+    className: '',
+    html: `<div style="width:20px;height:20px;border-radius:50%;background:${STOP_COLOR};color:#fff;
+                       font:600 11px/16px system-ui,sans-serif;text-align:center;border:2px solid #fff;
+                       box-shadow:0 0 3px rgba(0,0,0,.5)">${number}</div>`,
+    iconSize: [20, 20],
+    iconAnchor: [10, 10],
+  });
+}
 
 function arrowIcon(color, bearing) {
   return L.divIcon({
@@ -80,7 +93,8 @@ window.mapApi = {
 
   // points: [[lat, lon, ele], ...]; start/end: [lat, lon] (dots drawn unless the picker shows them)
   // returnPoints: optional return route B -> A (scenarios), drawn orange and dashed
-  showRoute(points, start, end, fit, returnPoints) {
+  // stops: optional stops between start and end [{point: [lat, lon], dwell_min}]
+  showRoute(points, start, end, fit, returnPoints, stops) {
     this.clearRoute();
     const line = L.polyline(points.map((p) => [p[0], p[1]]), { color: '#1e88e5', weight: 4, opacity: 0.8 });
     const layers = [line];
@@ -88,6 +102,8 @@ window.mapApi = {
       layers.unshift(L.polyline(returnPoints.map((p) => [p[0], p[1]]),
         { color: '#fb8c00', weight: 3, opacity: 0.8, dashArray: '6 6' }));
     }
+    (stops || []).forEach((s, i) => layers.push(L.marker(s.point, { icon: stopIcon(i + 1) })
+      .bindTooltip(`Stop ${i + 1} · ${s.dwell_min ? `${s.dwell_min} min` : 'drive through'}`)));
     if (start) layers.push(L.marker(start, { icon: dotIcon(START_COLOR), interactive: false }));
     if (end) layers.push(L.marker(end, { icon: dotIcon(END_COLOR), interactive: false }));
     routeLayer = L.layerGroup(layers).addTo(map);
@@ -99,8 +115,18 @@ window.mapApi = {
     routeLayer = null;
   },
 
-  // Draggable start/end markers for the device dialog.
-  setPicker(start, end) {
+  // Draggable start/end/stop markers for the device dialog.
+  // A moved stop is reported as kind "stop:<index>".
+  setPicker(start, end, stops) {
+    picker.stops.forEach((m) => map.removeLayer(m));
+    picker.stops = (stops || []).map((point, i) => {
+      const marker = L.marker(point, { icon: stopIcon(i + 1), draggable: true }).addTo(map);
+      marker.on('dragend', (e) => {
+        const ll = e.target.getLatLng();
+        if (bridge) bridge.markerMoved(`stop:${i}`, ll.lat, ll.lng);
+      });
+      return marker;
+    });
     for (const [kind, point, color] of [['start', start, START_COLOR], ['end', end, END_COLOR]]) {
       if (picker[kind]) map.removeLayer(picker[kind]);
       picker[kind] = null;

@@ -125,9 +125,9 @@ def devices_delete(device_id):
 
 @app.post("/api/routes")
 def routes_generate():
-    """Generate (preview) a route between two points - not saved yet."""
+    """Generate (preview) a route between two points (and stops in between: "via") - not saved yet."""
     data = request.get_json(force=True)
-    return jsonify(services.generate_route(data.get("start"), data.get("end")))
+    return jsonify(services.generate_route(data.get("start"), data.get("end"), data.get("via")))
 
 
 @app.get("/api/routes/<int:route_id>")

@@ -17,20 +17,30 @@ class RoutingError(Exception):
     pass
 
 
-def generate_route(start, end, profile=None):
+def generate_route(start, end, profile=None, via=()):
     """
-    Ask GraphHopper for a route between two points.
+    Ask GraphHopper for a route between two points, optionally through stops in between.
 
-    start, end: (lat, lon)
+    start, end: (lat, lon); via: [(lat, lon), ...] visited in this order
     Returns {"points": [[lat, lon, ele], ...], "distance_m": float, "duration_s": float,
-             "profile": {"average_speed": [...], "max_speed": [...], "road_class": [...]}}
+             "profile": {"average_speed": [...], "max_speed": [...], "road_class": [...]},
+             "stop_indices": [index into points of every via point]}
     """
     if not config.GRAPHHOPPER_API_KEY:
         raise RoutingError("GraphHopper API key missing (see graphhopper_api.txt)")
 
+    # The plan limits the points per request: ask for overlapping parts (the last point of
+    # one part is the first of the next) and join them.
+    waypoints = [start, *via, end]
+    step = config.GRAPHHOPPER_MAX_POINTS - 1
+    parts = [_request(waypoints[i:i + step + 1], profile) for i in range(0, len(waypoints) - 1, step)]
+    return _join(parts)
+
+
+def _request(waypoints, profile):
+    """One GraphHopper request through all `waypoints` (first = start, last = end)."""
     params = [
-        ("point", f"{start[0]},{start[1]}"),
-        ("point", f"{end[0]},{end[1]}"),
+        *[("point", f"{lat},{lon}") for lat, lon in waypoints],
         ("profile", profile or config.GRAPHHOPPER_PROFILE),
         ("points_encoded", "false"),   # plain GeoJSON coordinates
         ("elevation", "true"),
@@ -59,7 +69,47 @@ def generate_route(start, end, profile=None):
         "distance_m": path["distance"],
         "duration_s": path["time"] / 1000,
         "profile": {name: path.get("details", {}).get(name) for name in PROFILE_DETAILS},
+        "stop_indices": _stop_indices(points, path.get("snapped_waypoints", {}).get("coordinates", [])[1:-1]),
     }
+
+
+def _join(parts):
+    """
+    One route from consecutive parts. Part k starts where part k-1 ends, so its first point
+    is dropped and its point indices (details, stops) move by the length of the route so far.
+    The end of every part but the last is a stop too.
+    """
+    route = dict(parts[0])
+    route["profile"] = {name: list(route["profile"][name] or []) for name in PROFILE_DETAILS}
+    route["stop_indices"] = list(route["stop_indices"])
+    for part in parts[1:]:
+        offset = len(route["points"]) - 1
+        route["stop_indices"].append(offset)
+        route["stop_indices"] += [i + offset for i in part["stop_indices"]]
+        route["points"] = route["points"] + part["points"][1:]
+        route["distance_m"] += part["distance_m"]
+        route["duration_s"] += part["duration_s"]
+        for name in PROFILE_DETAILS:
+            route["profile"][name] += [[a + offset, b + offset, v] for a, b, v in part["profile"][name] or []]
+    if len(parts) == 1:
+        route["profile"] = parts[0]["profile"]
+    return route
+
+
+def _stop_indices(points, snapped):
+    """
+    Route point index of every via point. GraphHopper's snapped waypoints are vertices
+    of the path, so look for the same coordinates (in order); the nearest point is a fallback.
+    """
+    indices, start = [], 0
+    for lon, lat, *_ in snapped:
+        candidates = range(start, len(points))
+        index = next((i for i in candidates if points[i][0] == lat and points[i][1] == lon), None)
+        if index is None:
+            index = min(candidates, key=lambda i: geo.haversine_m(lat, lon, points[i][0], points[i][1]))
+        indices.append(index)
+        start = index
+    return indices
 
 
 def straight_line_route(start, end, step_m=100):
@@ -73,4 +123,5 @@ def straight_line_route(start, end, step_m=100):
         [start[0] + (end[0] - start[0]) * i / steps, start[1] + (end[1] - start[1]) * i / steps, 0]
         for i in range(steps + 1)
     ]
-    return {"points": points, "distance_m": total, "duration_s": total / (50 / 3.6), "profile": None}
+    return {"points": points, "distance_m": total, "duration_s": total / (50 / 3.6), "profile": None,
+            "stop_indices": []}

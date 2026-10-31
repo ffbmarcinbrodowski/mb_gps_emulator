@@ -161,11 +161,12 @@ def summary(scenario):
 class ScenarioDialog(QDialog):
     """Edits a scenario; the device dialog keeps the result until the device is saved."""
 
-    def __init__(self, parent, scenario, duration_s, device_id):
+    def __init__(self, parent, scenario, duration_s, device_id, stops_s=0):
         super().__init__(parent)
         self.setWindowTitle("Scenario")
         self.resize(520, 420)
         self.duration_s = duration_s
+        self.stops_s = stops_s     # waiting time at the stops of the route
         self.device_id = device_id
         self.scenario = scenario
 
@@ -188,7 +189,8 @@ class ScenarioDialog(QDialog):
     def _preview(self):
         """Validates the scenario and returns the preview (raises ServiceError)."""
         return services.scenario_preview(
-            {"scenario": self.widget.value(), "duration_s": self.duration_s, "device_id": self.device_id})
+            {"scenario": self.widget.value(), "duration_s": self.duration_s, "device_id": self.device_id,
+             "stops_s": self.stops_s})
 
     def _update_preview(self):
         try:

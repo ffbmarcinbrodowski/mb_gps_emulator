@@ -11,7 +11,7 @@ const DEFAULTS = {
   round_trip: true, dwell_min: 5, jitter_min: 5, days: [0, 1, 2, 3, 4],
 };
 
-export function initScenarioForm({ deviceModal, durationS, deviceId }) {
+export function initScenarioForm({ deviceModal, durationS, deviceId, stopsS = () => 0 }) {
   const modal = new bootstrap.Modal($('scenarioModal'));
   let current = null;   // scenario saved with the device (null = manual)
 
@@ -58,7 +58,7 @@ export function initScenarioForm({ deviceModal, durationS, deviceId }) {
     if (scenario) {
       try {
         // The server validates and normalizes it (e.g. "7:30,16:30" -> ["07:30", "16:30"]).
-        scenario = (await api.scenarios.preview(scenario, durationS(), deviceId())).scenario;
+        scenario = (await api.scenarios.preview(scenario, durationS(), deviceId(), stopsS())).scenario;
       } catch (err) {
         $('scPreview').innerHTML = `<div class="text-danger">${esc(err.message)}</div>`;
         return;
@@ -124,7 +124,7 @@ export function initScenarioForm({ deviceModal, durationS, deviceId }) {
     }
     try {
       // The device id makes the random shifts the same as the emulator will use.
-      const p = await api.scenarios.preview(scenario, durationS(), deviceId());
+      const p = await api.scenarios.preview(scenario, durationS(), deviceId(), stopsS());
       el.innerHTML = `<div class="text-secondary">Next departures (${esc(p.timezone)}):</div>`
         + p.trips.map((t) => `<div>${esc(t.at)} &nbsp; ${esc(t.legs)}</div>`).join('')
         + p.warnings.map((w) => `<div class="text-warning-emphasis">⚠ ${esc(w)}</div>`).join('');

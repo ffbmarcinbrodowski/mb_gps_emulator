@@ -3,7 +3,7 @@
 import { api } from './api.js';
 import { initDeviceForm } from './deviceForm.js';
 import { initHistory } from './history.js';
-import { createMap, deviceIcon, endpointMarker, routeLine } from './map.js';
+import { createMap, deviceIcon, endpointMarker, routeLine, stopMarker } from './map.js';
 import { initServers } from './servers.js';
 import { STATUS_BADGE, esc, fmtCoord, fmtKm, obdText, scenarioText, toast } from './ui.js';
 
@@ -84,7 +84,7 @@ function deviceCard(d) {
         <div class="progress-bar" style="width:${d.progress_pct}%"></div>
       </div>
       <div class="meta text-secondary">
-        IMEI ${esc(d.imei)} · ${r ? fmtKm(r.distance_m) : 'no route'} · ${d.interval_s} s · max ${d.speed_kmh} km/h
+        IMEI ${esc(d.imei)} · ${r ? fmtKm(r.distance_m) : 'no route'}${stopsText(r)} · ${d.interval_s} s · max ${d.speed_kmh} km/h
         · odo ${fmtKm(d.odometer_m)}${d.realistic ? '' : ' · simple'}
         · ${d.server ? esc(`${d.server.host}:${d.server.port}`) : 'no server'}
       </div>
@@ -99,6 +99,12 @@ function deviceCard(d) {
         <i class="bi bi-lightning-charge"></i> Last event: ${esc(d.last_event)} · ${esc(d.last_event_local)}</div>` : ''}
       ${d.last_error ? `<div class="meta text-danger text-break">${esc(d.last_error)}</div>` : ''}
     </div>`;
+}
+
+// " · 2 stops" (stops between start and end of the route)
+function stopsText(route) {
+  const n = route?.stops.length;
+  return n ? ` · ${n} stop${n > 1 ? 's' : ''}` : '';
 }
 
 $('deviceList').addEventListener('click', async (e) => {
@@ -189,7 +195,9 @@ async function renderSelected(fit = false) {
   const full = await api.devices.get(d.id);
   if (state.routeKey !== key) return; // selection changed while loading
   const line = routeLine(full.route.points);
-  const layers = [line, endpointMarker(full.route.start, 'start'), endpointMarker(full.route.end, 'end')];
+  const layers = [line, ...full.route.stops.map((s, i) => stopMarker(s.point, i + 1)
+    .bindTooltip(`Stop ${i + 1} · ${s.dwell_min ? `${s.dwell_min} min` : 'drive through'}`)),
+  endpointMarker(full.route.start, 'start'), endpointMarker(full.route.end, 'end')];
   if (full.route.return_points) {
     // Return route B -> A (scenarios): orange, dashed.
     layers.unshift(L.polyline(full.route.return_points.map((p) => [p[0], p[1]]),

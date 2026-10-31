@@ -29,7 +29,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from . import config, database, geo, scenarios
+from . import config, database, geo, models, scenarios
 from .events import EVENTS
 from .history import HistoryJob
 from .motion import GpsReceiver, Parked, Trip
@@ -110,7 +110,7 @@ class DeviceWorker(threading.Thread):
 
     def _run_once(self):
         """Manual mode: drive A -> B once (resuming where it was stopped)."""
-        points, _profile = self._leg("forward")
+        points, _profile, _stops = self._leg("forward")
         total = geo.cumulative_distances(points)[-1]
         progress = self.device["progress_m"] if self.device["direction"] == "forward" else 0.0
         if self._drive("forward", progress if progress < total else 0.0):
@@ -132,7 +132,7 @@ class DeviceWorker(threading.Thread):
         self._update(scenario_enabled=1)
 
         # Armed now: stand where the plan says the vehicle should be (or leave at once).
-        leg_s = scenarios.leg_seconds(self.route["duration_s"])
+        leg_s = scenarios.leg_seconds(self.route["duration_s"], models.stops_seconds(self.route))
         location, drive_now = scenarios.initial_position(cfg, datetime.now(tz), leg_s, seed)
         if cfg["type"] == "loop":
             # A loop has no fixed plan - continue from the end of the route the vehicle is at.
@@ -164,7 +164,7 @@ class DeviceWorker(threading.Thread):
 
     def _nearest_end(self):
         """'A' or 'B', whichever end of the route is closer to the last known position."""
-        points, _profile = self._leg("forward")
+        points, _profile, _stops = self._leg("forward")
         lat, lon = self.device["current_lat"], self.device["current_lon"]
         if lat is None:
             return "A"
@@ -173,19 +173,13 @@ class DeviceWorker(threading.Thread):
         return "B" if to_b < to_a else "A"
 
     def _leg(self, direction):
-        """Points and road profile of A -> B ("forward") or B -> A ("return")."""
-        r = self.route
-        if direction == "return":
-            if r["return_points"]:
-                profile = json.loads(r["return_profile"]) if r["return_profile"] else None
-                return json.loads(r["return_points"]), profile
-            return list(reversed(json.loads(r["points"]))), None   # old data without a return route
-        return json.loads(r["points"]), json.loads(r["profile"]) if r["profile"] else None
+        """Points, road profile and stops of A -> B ("forward") or B -> A ("return")."""
+        return models.route_leg(self.route, direction)
 
     def _drive(self, direction, start_m=0.0):
         """Drive one leg. Returns True at the destination, False if the device was stopped."""
-        points, profile = self._leg(direction)
-        self.trip = Trip(points, profile, self.device["speed_kmh"], self.realistic, start_m, self.rng)
+        points, profile, stops = self._leg(direction)
+        self.trip = Trip(points, profile, self.device["speed_kmh"], self.realistic, start_m, self.rng, stops)
         self.trip_start_odometer = self.odometer
         self.fix = self.gps.fix(self.trip.state())
         self._update(direction=direction, activity="driving", next_trip_at=None, progress_m=start_m)
@@ -193,7 +187,7 @@ class DeviceWorker(threading.Thread):
 
     def _park(self, location, until, tz):
         """Stand at "A" or "B" with the ignition off until `until` (None = until stopped)."""
-        points, _profile = self._leg("forward")
+        points, _profile, _stops = self._leg("forward")
         at_b = location == "B"
         heading = self.fix["heading"] if self.fix else 0.0
         distance = geo.cumulative_distances(points)[-1] if at_b else 0.0

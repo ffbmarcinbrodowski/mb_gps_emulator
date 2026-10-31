@@ -31,6 +31,9 @@ DEFAULT_SPEED_KMH = 50        # average speed along the route
 SPEED_VARIATION = 0.15        # +/- 15 % random speed noise per tick
 TCP_TIMEOUT_S = 5             # connect / ack timeout for the Teltonika client
 GRAPHHOPPER_PROFILE = "car"   # car, bike, foot ... (depends on your plan)
+# Points per routing request allowed by the GraphHopper plan (free plan: 5). Routes with more
+# stops are requested in parts and joined (core/graphhopper.py).
+GRAPHHOPPER_MAX_POINTS = max(2, int(os.environ.get("GRAPHHOPPER_MAX_POINTS", "5")))
 
 
 def _local_timezone():

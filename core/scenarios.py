@@ -31,9 +31,10 @@ ALL_DAYS = [0, 1, 2, 3, 4, 5, 6]
 DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 
-def leg_seconds(route_duration_s):
-    """Expected duration of one drive: GraphHopper time + traffic stops + idling at both ends."""
-    return (route_duration_s or 0) * 1.15 + 120
+def leg_seconds(route_duration_s, stops_s=0):
+    """Expected duration of one drive: GraphHopper time + traffic stops + idling at both ends
+    + waiting at the planned stops of the route (stops_s)."""
+    return (route_duration_s or 0) * 1.15 + 120 + (stops_s or 0)
 
 
 def parse_hhmm(text, allow_24=False):

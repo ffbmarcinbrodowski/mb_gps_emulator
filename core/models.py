@@ -78,6 +78,8 @@ def route_to_dict(row, include_points=False):
         "has_profile": row["profile"] is not None,   # road speed profile (realistic driving)
         "has_return": row["return_points"] is not None,   # return route B -> A (scenarios)
         "return_distance_m": row["return_distance_m"],
+        # Stops between start and end: [{"point": [lat, lon], "dwell_min": 5}, ...]
+        "stops": [{"point": [s["lat"], s["lon"]], "dwell_min": s["dwell_min"]} for s in _stops(row)],
     }
     if include_points:
         result["points"] = json.loads(row["points"])
@@ -90,16 +92,32 @@ def get_route(db, route_id, include_points=True):
     return route_to_dict(row, include_points) if row else None
 
 
-def save_route(db, device_id, start, end, route, return_route=None):
-    """Insert or replace the route of a device (and its return route). Resets the device's progress."""
+def _stops(route_row):
+    return json.loads(route_row["stops"]) if route_row["stops"] else []
+
+
+def _stops_json(stops, indices):
+    """Stops [{"point", "dwell_min"}] + their route point indices -> JSON for routes.stops."""
+    if not stops:
+        return None
+    return json.dumps([{"lat": s["point"][0], "lon": s["point"][1], "dwell_min": s["dwell_min"], "index": i}
+                       for s, i in zip(stops, indices)])
+
+
+def save_route(db, device_id, start, end, route, return_route=None, stops=()):
+    """
+    Insert or replace the route of a device (and its return route). Resets the device's progress.
+    stops: [{"point": [lat, lon], "dwell_min": n}] in driving order; route["stop_indices"] says
+    where on the route each of them lies.
+    """
     db.execute("DELETE FROM routes WHERE device_id = ?", (device_id,))
     profile = route.get("profile")
     db.execute(
         "INSERT INTO routes (device_id, start_lat, start_lon, end_lat, end_lon, points, distance_m, duration_s,"
-        " profile) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        " profile, stops) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (device_id, start[0], start[1], end[0], end[1],
          json.dumps(route["points"]), route["distance_m"], route["duration_s"],
-         json.dumps(profile) if profile else None),
+         json.dumps(profile) if profile else None, _stops_json(stops, route.get("stop_indices") or [])),
     )
     if return_route:
         set_return_route(db, device_id, return_route)
@@ -109,6 +127,34 @@ def save_route(db, device_id, start, end, route, return_route=None):
         " current_lon = ?, current_speed = 0, current_bearing = 0 WHERE id = ?",
         (first[0], first[1], device_id),
     )
+
+
+def set_stop_dwell(db, device_id, stops):
+    """New waiting times for the same stops (the route itself stays as it is)."""
+    row = db.execute("SELECT stops FROM routes WHERE device_id = ?", (device_id,)).fetchone()
+    indices = [s["index"] for s in _stops(row)]
+    db.execute("UPDATE routes SET stops = ? WHERE device_id = ?", (_stops_json(stops, indices), device_id))
+
+
+def route_leg(route_row, direction):
+    """
+    What the vehicle drives on A -> B ("forward") or B -> A ("return"):
+    (points, road profile, stops [(route point index, seconds waiting)]).
+    The return route goes straight back without stops.
+    """
+    if direction == "return":
+        if route_row["return_points"]:
+            profile = json.loads(route_row["return_profile"]) if route_row["return_profile"] else None
+            return json.loads(route_row["return_points"]), profile, []
+        return list(reversed(json.loads(route_row["points"]))), None, []   # old data without a return route
+    profile = json.loads(route_row["profile"]) if route_row["profile"] else None
+    stops = [(s["index"], s["dwell_min"] * 60) for s in _stops(route_row) if s["dwell_min"] > 0]
+    return json.loads(route_row["points"]), profile, stops
+
+
+def stops_seconds(route_row):
+    """Total waiting time at the stops of A -> B (for the expected trip duration of scenarios)."""
+    return sum(s["dwell_min"] * 60 for s in _stops(route_row))
 
 
 def set_return_route(db, device_id, route):

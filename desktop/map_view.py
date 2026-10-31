@@ -40,7 +40,7 @@ def _qwebchannel_script():
 class _Bridge(QObject):
     """Object visible in JavaScript as `bridge`."""
     clicked = Signal(float, float)               # lat, lon
-    marker_moved = Signal(str, float, float)     # "start"/"end", lat, lon
+    marker_moved = Signal(str, float, float)     # "start"/"end"/"stop:<index>", lat, lon
     device_clicked = Signal(int)                 # device id
 
     @Slot(float, float)
@@ -109,14 +109,16 @@ class MapView(QWebEngineView):
             })
         self._call("setDevices", markers, fit)
 
-    def show_route(self, points, start=None, end=None, fit=False, return_points=None):
-        self._call("showRoute", points, start, end, fit, return_points)
+    def show_route(self, points, start=None, end=None, fit=False, return_points=None, stops=None):
+        """stops: [{"point": [lat, lon], "dwell_min": n}] between start and end (numbered markers)."""
+        self._call("showRoute", points, start, end, fit, return_points, stops)
 
     def clear_route(self):
         self._call("clearRoute")
 
-    def set_picker(self, start, end):
-        self._call("setPicker", start, end)
+    def set_picker(self, start, end, stops=()):
+        """Draggable markers of the device dialog; stops: [[lat, lon], ...]."""
+        self._call("setPicker", start, end, list(stops))
 
     def center(self, point, zoom=None):
         self._call("center", point, zoom)

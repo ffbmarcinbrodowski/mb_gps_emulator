@@ -8,6 +8,7 @@ The vehicle:
     - accelerates and brakes smoothly and slows down before curves,
       lower speed limits, stops and the end of the route,
     - stops now and then at traffic lights / junctions (more often in town),
+    - waits at the planned stops of the route for the given time, engine running,
     - idles for a moment at the destination and turns the ignition off.
 
 GpsReceiver turns the true state into what a tracker reports (GPS noise,
@@ -68,7 +69,8 @@ def corner_speed(angle_deg, arc_m=2 * CORNER_WINDOW_M):
 class Trip:
     """One drive along a route. Call step(dt) repeatedly, read state()."""
 
-    def __init__(self, points, profile=None, max_speed_kmh=90, realistic=True, start_m=0.0, rng=None):
+    def __init__(self, points, profile=None, max_speed_kmh=90, realistic=True, start_m=0.0, rng=None, stops=()):
+        """stops: planned stops [(route point index, seconds to wait)], e.g. from models.route_leg()."""
         self.rng = rng or random.Random()
         self.points = points
         self.cum = geo.cumulative_distances(points)
@@ -83,12 +85,15 @@ class Trip:
 
         self.seg_speed = self._segment_speeds(profile)
         self.corner_v = self._corner_speeds() if realistic else {}
+        # Planned stops still ahead: [(distance on the route m, seconds to wait)]
+        self.planned = sorted((self.cum[i], float(seconds)) for i, seconds in stops
+                              if seconds > 0 and self.s < self.cum[i] < self.total)
         self.stops = self._traffic_stops() if realistic else []
         self.driver = self.rng.uniform(0.92, 1.04) if realistic else 1.0   # this driver's pace
         self.wobble = 1.0                                                  # small speed variation
         self.override = None    # [speed m/s, seconds left] while an "overspeed" event is active
 
-        # phases: idle_start -> driving <-> traffic_stop -> idle_end -> done
+        # phases: idle_start -> driving <-> traffic_stop / stop -> idle_end -> done
         if realistic:
             self.phase, self.timer = "idle_start", self.rng.uniform(*IDLE_BEFORE_START_S)
         else:
@@ -163,7 +168,8 @@ class Trip:
         for p in stops:                     # no two stops closer than 80 m
             if not merged or p - merged[-1] > 80:
                 merged.append(p)
-        return merged
+        # The vehicle stands at a planned stop anyway - no traffic stop right before or after it.
+        return [p for p in merged if all(abs(p - q) > 80 for q, _seconds in self.planned)]
 
     # --- Simulation --------------------------------------------------------
 
@@ -192,13 +198,15 @@ class Trip:
             j += 1
         if self.stops and self.stops[0] - self.s < LOOKAHEAD_M:
             target = min(target, limit_ahead(self.stops[0], 0))
+        if self.planned and self.planned[0][0] - self.s < LOOKAHEAD_M:
+            target = min(target, limit_ahead(self.planned[0][0], 0))
         target = min(target, limit_ahead(self.total, 0))
         # Creep the last meters to a stop instead of stopping short.
         return max(target, 1.0) if self.realistic else target
 
     def step(self, dt):
         """Advance the simulation by dt seconds."""
-        if self.phase in ("idle_start", "traffic_stop", "idle_end"):
+        if self.phase in ("idle_start", "traffic_stop", "stop", "idle_end"):
             self.timer -= dt
             if self.timer <= 0:
                 self.phase = "done" if self.phase == "idle_end" else "driving"
@@ -221,7 +229,12 @@ class Trip:
             self.v = self.override[0] if self.override else self.max_speed
 
         new_s = self.s + self.v * dt
-        if self.stops and new_s >= self.stops[0]:
+        planned = self.planned[0][0] if self.planned else math.inf
+        if new_s >= planned and (not self.stops or planned <= self.stops[0]):
+            # Reached a planned stop: wait there with the engine running.
+            self.s, self.timer = self.planned.pop(0)
+            self.v, self.phase = 0.0, "stop"
+        elif self.stops and new_s >= self.stops[0]:
             # Reached a traffic stop: stand still for a while.
             self.s, self.v = self.stops.pop(0), 0.0
             self.phase, self.timer = "traffic_stop", self.rng.uniform(*STOP_DURATION_S)
