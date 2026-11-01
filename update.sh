@@ -47,6 +47,8 @@ fi
 
 # --- git (local or in a container) ---------------------------------------------------------
 
+# Never ask for a GitHub password (GitHub accepts only tokens) - fail with a hint instead.
+export GIT_TERMINAL_PROMPT=0
 AUTH=""
 if [ -f .github_token ]; then
     TOKEN=$(tr -d ' \r\n' < .github_token)
@@ -60,10 +62,11 @@ git_() {
     else
         # safe.directory: the folder belongs to another user than root inside the container
         if [ -n "$AUTH" ]; then
-            "$DOCKER" run --rm -v "$DIR":/repo -w /repo alpine/git \
+            "$DOCKER" run --rm -e GIT_TERMINAL_PROMPT=0 -v "$DIR":/repo -w /repo alpine/git \
                 -c safe.directory=/repo -c "http.extraHeader=$AUTH" "$@"
         else
-            "$DOCKER" run --rm -v "$DIR":/repo -w /repo alpine/git -c safe.directory=/repo "$@"
+            "$DOCKER" run --rm -e GIT_TERMINAL_PROMPT=0 -v "$DIR":/repo -w /repo alpine/git \
+                -c safe.directory=/repo "$@"
         fi
     fi
 }
@@ -74,7 +77,19 @@ git_() {
 
 log "Checking GitHub for a new version..."
 OLD=$(git_ rev-parse --short HEAD)
-git_ fetch --quiet origin
+if ! git_ fetch --quiet origin; then
+    echo
+    if [ -z "$AUTH" ]; then
+        echo "ERROR: GitHub needs a token for this private repository, but $DIR/.github_token does not exist."
+    else
+        echo "ERROR: GitHub refused the token in .github_token (expired, or no access to the repository?)."
+    fi
+    echo "Create a fine-grained token on GitHub (Settings > Developer settings > Personal access tokens):"
+    echo "only this repository, permission 'Contents: Read-only'. Then save it on the NAS:"
+    echo "    cat > .github_token      (paste the token, Enter, Ctrl+D)"
+    echo "    chmod 600 .github_token"
+    exit 1
+fi
 BRANCH=$(git_ rev-parse --abbrev-ref HEAD)
 NEW=$(git_ rev-parse --short "origin/$BRANCH")
 
