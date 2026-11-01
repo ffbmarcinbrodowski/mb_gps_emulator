@@ -197,59 +197,78 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
       <div class="modal-body">
+        <div class="d-flex align-items-center mb-2">
+          <span class="small text-secondary flex-grow-1">Servers the emulated devices send their positions to.</span>
+          <button type="button" class="btn btn-sm btn-primary text-nowrap" id="btnServerNew">
+            <i class="bi bi-plus-lg"></i> Add server
+          </button>
+        </div>
         <div class="table-responsive">
-          <table class="table table-sm align-middle">
-            <thead><tr><th>Name</th><th>Host</th><th>Port</th><th></th></tr></thead>
+          <table class="table table-sm align-middle mb-0">
+            <thead><tr><th>Name</th><th>Address (devices)</th><th>Traccar API</th><th></th></tr></thead>
             <tbody id="serverTable"></tbody>
           </table>
         </div>
 
-        <form id="serverForm" class="row g-2 align-items-end" novalidate autocomplete="off">
+        <!-- Add / edit form: hidden until "Add server" or the edit button is clicked -->
+        <form id="serverForm" class="card mt-3 d-none" novalidate autocomplete="off">
           <input type="hidden" id="sId">
-          <div class="col-sm-4">
-            <label class="form-label small mb-1" for="sName">Name</label>
-            <input class="form-control form-control-sm" id="sName" required>
+          <div class="card-header py-2 fw-semibold" id="serverFormTitle">New server</div>
+          <div class="card-body">
+            <h3 class="h6 mb-1">1. Connection for devices</h3>
+            <p class="small text-secondary mb-2">
+              Where the emulated trackers send their data (Teltonika TCP). Traccar's Teltonika port is <b>5027</b>.
+            </p>
+            <div class="row g-2">
+              <div class="col-sm-4">
+                <label class="form-label small mb-1" for="sName">Name</label>
+                <input class="form-control form-control-sm" id="sName" placeholder="My Traccar" required>
+              </div>
+              <div class="col-sm-5">
+                <label class="form-label small mb-1" for="sHost">Host</label>
+                <input class="form-control form-control-sm" id="sHost" placeholder="10.40.1.114 or demo.traccar.org" required>
+              </div>
+              <div class="col-sm-3">
+                <label class="form-label small mb-1" for="sPort">Port</label>
+                <input type="number" class="form-control form-control-sm" id="sPort" placeholder="5027" min="1" max="65535" required>
+              </div>
+            </div>
+
+            <hr class="my-3">
+            <h3 class="h6 mb-1">2. Traccar API access <span class="fw-normal text-secondary">(optional)</span></h3>
+            <div class="form-check form-switch mb-2">
+              <input class="form-check-input" type="checkbox" role="switch" id="sApiEnabled">
+              <label class="form-check-label small" for="sApiEnabled">
+                Use the Traccar API – the emulator then creates its devices in Traccar itself
+                (it only creates devices, it never changes or deletes any)
+              </label>
+            </div>
+            <div class="row g-2 d-none" id="serverApiFields">
+              <div class="col-sm-12">
+                <label class="form-label small mb-1" for="sApiUrl">Traccar web address</label>
+                <input class="form-control form-control-sm" id="sApiUrl" placeholder="http://10.40.1.114:8082">
+              </div>
+              <div class="col-sm-5">
+                <label class="form-label small mb-1" for="sApiUser">Login (e-mail)</label>
+                <input class="form-control form-control-sm" id="sApiUser" autocomplete="off">
+              </div>
+              <div class="col-sm-5">
+                <label class="form-label small mb-1" for="sApiPassword">Password</label>
+                <input type="password" class="form-control form-control-sm" id="sApiPassword" autocomplete="new-password">
+              </div>
+              <div class="col-sm-2 d-flex align-items-end">
+                <button class="btn btn-sm btn-outline-secondary w-100" type="button" id="btnServerTestApi"
+                        title="Check address and login without saving">Test</button>
+              </div>
+              <div class="col-12 small" id="serverApiResult"></div>
+            </div>
           </div>
-          <div class="col-sm-4">
-            <label class="form-label small mb-1" for="sHost">Host</label>
-            <input class="form-control form-control-sm" id="sHost" placeholder="demo.traccar.org" required>
+          <div class="card-footer d-flex align-items-center gap-2 py-2">
+            <span class="small text-secondary flex-grow-1" id="serverSaveHint">Saves the server.</span>
+            <button class="btn btn-sm btn-outline-secondary" type="button" id="btnServerCancel">Cancel</button>
+            <button class="btn btn-sm btn-primary" type="submit" id="btnServerSave">Add server</button>
           </div>
-          <div class="col-6 col-sm-2">
-            <label class="form-label small mb-1" for="sPort">Port</label>
-            <input type="number" class="form-control form-control-sm" id="sPort" placeholder="5027" min="1" max="65535" required>
-          </div>
-          <div class="col-6 col-sm-2 d-flex gap-1">
-            <button class="btn btn-sm btn-primary flex-fill" type="submit" id="btnServerSave">Add</button>
-            <button class="btn btn-sm btn-outline-secondary d-none" type="button" id="btnServerCancel" title="Cancel edit">
-              <i class="bi bi-x-lg"></i>
-            </button>
-          </div>
-          <!-- Optional Traccar REST API access: lets the emulator create its devices in Traccar -->
-          <div class="col-12 small text-secondary mt-3">
-            Traccar API (optional) – to create emulator devices in Traccar directly
-          </div>
-          <div class="col-sm-4">
-            <input class="form-control form-control-sm" id="sApiUrl" placeholder="http://10.40.1.114:8082"
-                   aria-label="Traccar API address">
-          </div>
-          <div class="col-sm-3">
-            <input class="form-control form-control-sm" id="sApiUser" placeholder="Login (e-mail)"
-                   aria-label="Traccar login" autocomplete="off">
-          </div>
-          <div class="col-sm-3">
-            <input type="password" class="form-control form-control-sm" id="sApiPassword" placeholder="Password"
-                   aria-label="Traccar password" autocomplete="new-password">
-          </div>
-          <div class="col-sm-2">
-            <button class="btn btn-sm btn-outline-secondary w-100" type="button" id="btnServerTestApi">Test</button>
-          </div>
-          <div class="col-12 small" id="serverApiResult"></div>
         </form>
-        <p class="small text-secondary mt-3 mb-0">
-          Traccar listens for Teltonika devices on port <strong>5027</strong> by default.
-          Each device's IMEI must also be added as a device in Traccar – with the Traccar API access
-          the emulator can do that for you (it only creates devices, it never changes or deletes any).
-        </p>
       </div>
     </div>
   </div>
