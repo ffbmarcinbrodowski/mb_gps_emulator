@@ -27,7 +27,20 @@ def local_time(utc_text):
 # --- Servers ----------------------------------------------------------------
 
 def server_to_dict(row):
-    return {"id": row["id"], "name": row["name"], "host": row["host"], "port": row["port"]}
+    return {
+        "id": row["id"], "name": row["name"], "host": row["host"], "port": row["port"],
+        # Traccar REST API access (optional); the password itself never leaves the core.
+        "api_url": row["api_url"] or "",
+        "api_user": row["api_user"] or "",
+        "api_password_set": bool(row["api_password"]),
+        "has_api": bool(row["api_url"]),
+    }
+
+
+def server_api_access(db, server_id):
+    """(url, user, password) of the server's Traccar API, or None if not configured."""
+    row = db.execute("SELECT api_url, api_user, api_password FROM servers WHERE id = ?", (server_id,)).fetchone()
+    return (row["api_url"], row["api_user"], row["api_password"]) if row and row["api_url"] else None
 
 
 def list_servers(db):
@@ -41,8 +54,8 @@ def get_server(db, server_id):
 
 def create_server(db, data):
     cur = db.execute(
-        "INSERT INTO servers (name, host, port) VALUES (?, ?, ?)",
-        (data["name"], data["host"], data["port"]),
+        "INSERT INTO servers (name, host, port, api_url, api_user, api_password) VALUES (?, ?, ?, ?, ?, ?)",
+        (data["name"], data["host"], data["port"], data.get("api_url"), data.get("api_user"), data.get("api_password")),
     )
     db.commit()
     return cur.lastrowid
@@ -50,8 +63,9 @@ def create_server(db, data):
 
 def update_server(db, server_id, data):
     db.execute(
-        "UPDATE servers SET name = ?, host = ?, port = ? WHERE id = ?",
-        (data["name"], data["host"], data["port"], server_id),
+        "UPDATE servers SET name = ?, host = ?, port = ?, api_url = ?, api_user = ?, api_password = ? WHERE id = ?",
+        (data["name"], data["host"], data["port"], data.get("api_url"), data.get("api_user"), data.get("api_password"),
+         server_id),
     )
     db.commit()
 
@@ -171,7 +185,8 @@ def set_return_route(db, device_id, route):
 # --- Devices ----------------------------------------------------------------
 
 DEVICE_QUERY = """
-    SELECT d.*, s.name AS server_name, s.host AS server_host, s.port AS server_port
+    SELECT d.*, s.name AS server_name, s.host AS server_host, s.port AS server_port,
+           s.api_url AS server_api_url
     FROM devices d
     LEFT JOIN servers s ON s.id = d.server_id
 """
@@ -204,7 +219,9 @@ def device_to_dict(db, row, include_points=False):
         "imei": row["imei"],
         "server_id": row["server_id"],
         "server": {"id": row["server_id"], "name": row["server_name"],
-                   "host": row["server_host"], "port": row["server_port"]} if row["server_id"] else None,
+                   "host": row["server_host"], "port": row["server_port"],
+                   "has_api": bool(row["server_api_url"])} if row["server_id"] else None,
+        "traccar_id": row["traccar_id"],      # device id in Traccar, once created there by the emulator
         "interval_s": row["interval_s"],
         "speed_kmh": row["speed_kmh"],
         "realistic": bool(row["realistic"]),
@@ -276,9 +293,11 @@ def create_device(db, data):
 def update_device(db, device_id, data):
     db.execute(
         "UPDATE devices SET name = ?, imei = ?, server_id = ?, interval_s = ?, speed_kmh = ?, realistic = ?,"
-        " scenario = ?, updated_at = datetime('now') WHERE id = ?",
+        " scenario = ?, updated_at = datetime('now'),"
+        # The link to the Traccar device only holds for the same server and IMEI.
+        " traccar_id = CASE WHEN server_id = ? AND imei = ? THEN traccar_id END WHERE id = ?",
         (data["name"], data["imei"], data["server_id"], data["interval_s"], data["speed_kmh"],
-         int(data["realistic"]), _scenario_json(data), device_id),
+         int(data["realistic"]), _scenario_json(data), data["server_id"], data["imei"], device_id),
     )
     # OBD values are only written when they were edited: a running device keeps changing them,
     # and an old copy from the dialog must not turn the mileage back.
@@ -300,6 +319,11 @@ def save_obd(db, device_id, obd):
 
 def _scenario_json(data):
     return json.dumps(data["scenario"]) if data.get("scenario") else None
+
+
+def set_traccar_id(db, device_id, traccar_id):
+    db.execute("UPDATE devices SET traccar_id = ? WHERE id = ?", (traccar_id, device_id))
+    db.commit()
 
 
 def set_armed(db, device_id, armed):

@@ -9,7 +9,7 @@ import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from . import config, events, graphhopper, history, models, obd, scenarios
+from . import config, events, graphhopper, history, models, obd, scenarios, traccar_api
 from .imei import generate_imei
 
 
@@ -55,12 +55,33 @@ def parse_id(data, key):
     return _number(data, key, 1, 10**9, int)
 
 
-def parse_server(data):
-    return {
+def parse_server(data, stored_password=None):
+    """
+    A server; api_* = optional access to its Traccar REST API. An empty password keeps
+    the stored one (the UI never gets the password back).
+    """
+    server = {
         "name": _require(data, "name"),
         "host": _require(data, "host"),
         "port": _number(data, "port", 1, 65535, int),
     }
+    server.update(parse_api_access(data, stored_password))
+    return server
+
+
+def parse_api_access(data, stored_password=None):
+    url = str(data.get("api_url") or "").strip().rstrip("/")
+    if not url:
+        return {"api_url": None, "api_user": None, "api_password": None}
+    if not re.match(r"https?://[^\s/]+", url):
+        raise ServiceError("Traccar API address must start with http:// or https://, e.g. http://10.40.1.114:8082")
+    user = str(data.get("api_user") or "").strip()
+    if not user:
+        raise ServiceError("Enter the Traccar login (e-mail) for the API access")
+    password = data.get("api_password") or stored_password
+    if not password:
+        raise ServiceError("Enter the Traccar password for the API access")
+    return {"api_url": url, "api_user": user, "api_password": password}
 
 
 def parse_device(db, data):
@@ -270,8 +291,55 @@ def create_server(db, data):
 def update_server(db, server_id, data):
     if models.get_server(db, server_id) is None:
         raise ServiceError("Server not found", 404)
-    models.update_server(db, server_id, parse_server(data))
+    models.update_server(db, server_id, parse_server(data, _stored_password(db, server_id)))
     return models.get_server(db, server_id)
+
+
+def _stored_password(db, server_id):
+    access = models.server_api_access(db, server_id) if server_id else None
+    return access[2] if access else None
+
+
+def test_traccar_api(db, data):
+    """
+    Check the Traccar API access entered in the servers dialog (before or after saving).
+    data: {api_url, api_user, api_password, server_id} - an empty password = the stored one.
+    """
+    server_id = data.get("server_id")
+    access = parse_api_access(data, _stored_password(db, int(server_id)) if server_id else None)
+    if not access["api_url"]:
+        raise ServiceError("Enter the Traccar API address, e.g. http://10.40.1.114:8082")
+    try:
+        version = traccar_api.TraccarApi(access["api_url"], access["api_user"], access["api_password"]).version()
+    except traccar_api.TraccarError as exc:
+        raise ServiceError(str(exc), 502)
+    return {"version": version}
+
+
+def add_to_traccar(db, device_id):
+    """
+    Create the device in Traccar (name, IMEI, model) through the server's API - or link the
+    device that already exists there with this IMEI. Nothing in Traccar is changed or deleted.
+    Returns {"result": "created" / "exists", "traccar_id", "model", "message"}.
+    """
+    device = models.get_device(db, device_id, include_points=False)
+    if device is None:
+        raise ServiceError("Device not found", 404)
+    access = models.server_api_access(db, device["server_id"]) if device["server_id"] else None
+    if access is None:
+        raise ServiceError("Set up the Traccar API access of the server first (Servers)", 409)
+    model = traccar_api.device_model(device["obd"]["enabled"])
+    try:
+        found, created = traccar_api.TraccarApi(*access).ensure_device(device["name"], device["imei"], model)
+    except traccar_api.TraccarError as exc:
+        raise ServiceError(str(exc), 502)
+    models.set_traccar_id(db, device_id, found["id"])
+    if created:
+        message = f'Created in Traccar as "{found["name"]}" (model {model})'
+    else:
+        message = f'Already in Traccar as "{found["name"]}" (model {found.get("model") or "not set"}) - linked, not changed'
+    return {"result": "created" if created else "exists", "traccar_id": found["id"],
+            "model": found.get("model"), "message": message}
 
 
 def delete_server(db, server_id):
@@ -294,7 +362,18 @@ def create_device(db, data):
     device_id = models.create_device(db, device)
     models.save_route(db, device_id, device["start"], device["end"], route, return_route, device["stops"])
     db.commit()
-    return models.get_device(db, device_id)
+
+    # "Create in Traccar": the device is saved anyway - a Traccar error is only reported.
+    traccar = None
+    if data.get("traccar"):
+        try:
+            traccar = add_to_traccar(db, device_id)
+        except ServiceError as exc:
+            traccar = {"result": "error", "message": exc.message}
+    result = models.get_device(db, device_id)
+    if traccar:
+        result["traccar_result"] = traccar
+    return result
 
 
 def update_device(db, emulator, device_id, data):

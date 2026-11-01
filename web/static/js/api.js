@@ -23,12 +23,14 @@ export const api = {
     create: (data) => request('POST', '/api/devices', data),
     update: (id, data) => request('PUT', `/api/devices/${id}`, data),
     remove: (id) => request('DELETE', `/api/devices/${id}`),
+    addToTraccar: (id) => request('POST', `/api/devices/${id}/traccar`),
   },
   servers: {
     list: () => request('GET', '/api/servers'),
     create: (data) => request('POST', '/api/servers', data),
     update: (id, data) => request('PUT', `/api/servers/${id}`, data),
     remove: (id) => request('DELETE', `/api/servers/${id}`),
+    testApi: (data) => request('POST', '/api/servers/test-api', data),
   },
   history: {
     start: (deviceId, days) => request('POST', '/api/history', { device_id: deviceId, days }),

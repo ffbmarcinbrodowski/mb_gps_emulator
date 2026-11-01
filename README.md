@@ -148,6 +148,8 @@ allowed use.
 ## Usage
 
 1. **Servers:** click **Servers** in the header and add your Traccar server. Teltonika's default port in Traccar is **5027**.
+   Optionally enter the **Traccar API** access (address of the web interface, e.g. `http://10.40.1.114:8082`,
+   login and password) and click **Test**. Then the emulator can create its devices in Traccar for you.
 2. **Add a device:** click **+** in the *Devices* panel.
    - Enter a name and an IMEI (normally 15 digits), or click **Generate**. It creates a valid,
      unused IMEI from the test range `00…`, which is never assigned to real devices, so it can't
@@ -229,6 +231,24 @@ in the desktop app) generates it from the device's scenario without waiting:
 1. In Traccar, add a device whose **Identifier** is the same IMEI as in the emulator.
    Traccar rejects unknown IMEIs, and the emulator then shows *"Server rejected IMEI"* under the device.
 2. Point the emulator device at your Traccar server (port 5027) and click **Start**.
+
+### Creating devices in Traccar from the emulator
+
+With the Traccar API access of a server set up (**Servers**, see above), step 1 is done by the emulator:
+
+- **New device:** *Create in Traccar* (in the *Server* section of the device dialog, on by default) creates
+  the device in Traccar when you save: same name, the IMEI as identifier, model **FMB920**, or **FMB003**
+  with OBD (needed for the alarms and the OBD values), category car.
+- **Existing device:** click **Add to Traccar** in its dialog.
+- If Traccar already has a device with this IMEI, the emulator only links it and changes nothing.
+- The emulator **only creates** devices. It never changes or deletes anything in Traccar: renaming or
+  deleting a device in the emulator doesn't touch Traccar.
+- If Traccar is not reachable, the device is saved anyway and the error is shown. Try again with
+  **Add to Traccar**.
+- The Traccar user needs permission to add devices (not *read-only* or *device read-only*). Devices
+  created by a normal user are linked to that user in Traccar.
+- The password is stored in the emulator's database and never sent back to the browser. Leave the
+  password field empty when editing a server to keep the stored one.
 
 ### Alarms from events
 
@@ -399,7 +419,9 @@ section of variable-length values (VIN, fault codes).
 | Method | Endpoint | Description |
 |---|---|---|
 | GET, POST | `/api/servers` | List / create `{name, host, port}` |
-| GET, PUT, DELETE | `/api/servers/<id>` | Read / update / delete |
+| GET, PUT, DELETE | `/api/servers/<id>` | Read / update / delete (optional `api_url`, `api_user`, `api_password`: Traccar API access) |
+| POST | `/api/servers/test-api` | `{api_url, api_user, api_password, server_id?}` → `{version}` if the Traccar login works |
+| POST | `/api/devices/<id>/traccar` | Create the device in Traccar through the server's API (or link the existing one) |
 | GET, POST | `/api/devices` | List / create a device (route: `start`, `end`, optional `stops: [{point: [lat, lon], dwell_min: 5}, ...]`) |
 | GET, PUT, DELETE | `/api/devices/<id>` | Read (incl. route points) / update / delete |
 | POST | `/api/routes` | `{start: [lat, lon], end: [lat, lon], via: [[lat, lon], ...]}` → route preview through the stops |
@@ -429,6 +451,7 @@ core/                 shared core, no UI code
   teltonika.py        Codec 8 / 8 Extended encoder/decoder, CRC-16/IBM
   obd.py              OBD-II values of an FMB003: vehicle model, fault codes, VIN, on-change reporting
   tcp_client.py       TCP client: IMEI handshake, send, acknowledgement
+  traccar_api.py      Traccar REST API: create the emulator devices in Traccar
   geo.py              distance, bearing, interpolation along the route
   graphhopper.py      route generation
   motion.py           realistic driving: speed profile, acceleration, curves, stops, GPS noise

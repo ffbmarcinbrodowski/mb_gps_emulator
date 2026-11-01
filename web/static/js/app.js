@@ -86,7 +86,8 @@ function deviceCard(d) {
       <div class="meta text-secondary">
         IMEI ${esc(d.imei)} · ${r ? fmtKm(r.distance_m) : 'no route'}${stopsText(r)} · ${d.interval_s} s · max ${d.speed_kmh} km/h
         · odo ${fmtKm(d.odometer_m)}${d.realistic ? '' : ' · simple'}
-        · ${d.server ? esc(`${d.server.host}:${d.server.port}`) : 'no server'}
+        · ${d.server ? esc(`${d.server.host}:${d.server.port}`) : 'no server'}${d.traccar_id != null
+          ? ' · <i class="bi bi-cloud-check" title="Created in Traccar by the emulator"></i> Traccar' : ''}
       </div>
       ${d.scenario ? `<div class="meta text-info-emphasis">
         <i class="bi bi-calendar-week"></i> ${esc(scenarioText(d.scenario))}

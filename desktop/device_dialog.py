@@ -57,6 +57,7 @@ class DeviceDialog(QDialog):
         self.scenario = None       # scenario saved with the device (None = manual)
         self.obd, self.codec = None, "8"   # OBD settings shown in the summary
         self.obd_edited = False    # only edited OBD settings are saved (a running device counts its mileage)
+        self.saved_device = None   # the device as saved (edit): server and Traccar link
         self._route_request = 0  # ignores answers to outdated route requests
         self._alive = True       # background results may arrive after the dialog closed
 
@@ -159,6 +160,22 @@ class DeviceDialog(QDialog):
         form.addRow("Address", self.server_host)
         form.addRow("Port", self.server_port)
 
+        # Only for servers with Traccar API access (Servers…).
+        self.traccar_create = QCheckBox("Create in Traccar")
+        self.traccar_create.setChecked(True)
+        self.traccar_create.setToolTip("Name, IMEI and model FMB920 (FMB003 with OBD).\n"
+                                       "An existing device with this IMEI is only linked.")
+        self.traccar_status = QLabel()
+        self.traccar_status.setWordWrap(True)
+        self.traccar_btn = QPushButton("Add to Traccar")
+        self.traccar_btn.clicked.connect(self._add_to_traccar)
+        traccar_row = QHBoxLayout()
+        traccar_row.addWidget(self.traccar_create)
+        traccar_row.addWidget(self.traccar_status, 1)
+        traccar_row.addWidget(self.traccar_btn)
+        self.traccar_label = QLabel("Traccar")
+        form.addRow(self.traccar_label, traccar_row)
+
         self.error = QLabel()
         self.error.setWordWrap(True)
         self.error.setStyleSheet("color: #c62828;")
@@ -241,11 +258,58 @@ class DeviceDialog(QDialog):
         server = next((s for s in self.servers if s["id"] == self.server.currentData()), None)
         self.server_host.setText(server["host"] if server else "–")
         self.server_port.setText(str(server["port"]) if server else "–")
+        self._show_traccar(server)
+
+    # --- Traccar (only for servers with Traccar API access) ------------------------
+
+    def _show_traccar(self, server):
+        has_api = bool(server and server["has_api"])
+        saved = self.saved_device
+        for widget in (self.traccar_label, self.traccar_create, self.traccar_status, self.traccar_btn):
+            widget.setVisible(has_api)
+        if not has_api:
+            return
+        # New device: "Create in Traccar" when saving. Saved device: status or "Add to Traccar".
+        self.traccar_create.setVisible(saved is None)
+        self.traccar_status.setVisible(saved is not None)
+        same_server = saved is not None and saved["server_id"] == server["id"]
+        linked = same_server and saved["traccar_id"] is not None
+        self.traccar_btn.setVisible(same_server and not linked)
+        if saved is not None:
+            self.traccar_status.setText(f"In Traccar (id {saved['traccar_id']})" if linked
+                                        else "Not linked to Traccar yet" if same_server
+                                        else "Save the device first")
+
+    def _add_to_traccar(self):
+        device_id = self.device_id
+        self.traccar_btn.setEnabled(False)
+
+        def task():
+            db = database.connect()     # background thread: own connection
+            try:
+                return services.add_to_traccar(db, device_id)
+            finally:
+                db.close()
+
+        def done(result, error):
+            if not self._alive:
+                return
+            self.traccar_btn.setEnabled(True)
+            if error:
+                self._show_error(error_text(error))
+                return
+            self.saved_device = {**self.saved_device, "traccar_id": result["traccar_id"]}
+            self._show_server_details()
+            QMessageBox.information(self, "Traccar", result["message"])
+            self.saved.emit(self.saved_device)
+
+        run_async(task, done)
 
     # --- Editing an existing device ---------------------------------------------
 
     def _load_device(self, device_id):
         d = models.get_device(self.db, device_id)
+        self.saved_device = d
         self.name.setText(d["name"])
         self.imei.setText(d["imei"])
         self.interval.setValue(d["interval_s"])
@@ -483,6 +547,10 @@ class DeviceDialog(QDialog):
             payload["route"] = self.preview
         if self.obd_edited:
             payload["obd"] = self.obd
+        # New device on a server with Traccar API access: create it in Traccar too.
+        server = next((s for s in self.servers if s["id"] == self.server.currentData()), None)
+        if not self.device_id and server and server["has_api"] and self.traccar_create.isChecked():
+            payload["traccar"] = True
 
         device_id, emulator = self.device_id, self.emulator
 
@@ -507,6 +575,10 @@ class DeviceDialog(QDialog):
             self._show_error(error_text(error))
             return
         self.saved.emit(device)
+        traccar = device.get("traccar_result")
+        if traccar:
+            show = QMessageBox.warning if traccar["result"] == "error" else QMessageBox.information
+            show(self, "Traccar", traccar["message"])
         if keep_open:
             self.name.clear()
             self.imei.clear()

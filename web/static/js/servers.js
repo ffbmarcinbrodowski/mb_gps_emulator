@@ -13,7 +13,8 @@ export function initServers({ onChanged }) {
     $('serverTable').innerHTML = servers.length
       ? servers.map((s) => `
           <tr>
-            <td>${esc(s.name)}</td>
+            <td>${esc(s.name)}${s.has_api
+              ? ` <span class="badge text-bg-light border" title="Traccar API: ${esc(s.api_url)}">API</span>` : ''}</td>
             <td class="text-break">${esc(s.host)}</td>
             <td>${s.port}</td>
             <td class="text-end text-nowrap">
@@ -27,6 +28,8 @@ export function initServers({ onChanged }) {
   function resetForm() {
     $('serverForm').reset();
     $('sId').value = '';
+    $('sApiPassword').placeholder = 'Password';
+    showApiResult('');
     $('btnServerSave').textContent = 'Add';
     $('btnServerCancel').classList.add('d-none');
   }
@@ -46,6 +49,12 @@ export function initServers({ onChanged }) {
       $('sName').value = s.name;
       $('sHost').value = s.host;
       $('sPort').value = s.port;
+      $('sApiUrl').value = s.api_url;
+      $('sApiUser').value = s.api_user;
+      // The password is never sent to the browser: empty = keep the stored one.
+      $('sApiPassword').value = '';
+      $('sApiPassword').placeholder = s.api_password_set ? 'Password (unchanged)' : 'Password';
+      showApiResult('');
       $('btnServerSave').textContent = 'Save';
       $('btnServerCancel').classList.remove('d-none');
     }
@@ -65,9 +74,36 @@ export function initServers({ onChanged }) {
 
   $('btnServerCancel').addEventListener('click', resetForm);
 
+  function apiFields() {
+    return {
+      api_url: $('sApiUrl').value.trim(),
+      api_user: $('sApiUser').value.trim(),
+      api_password: $('sApiPassword').value,
+    };
+  }
+
+  function showApiResult(text, ok = true) {
+    const el = $('serverApiResult');
+    el.textContent = text;
+    el.classList.toggle('text-success', ok);
+    el.classList.toggle('text-danger', !ok);
+  }
+
+  $('btnServerTestApi').addEventListener('click', async () => {
+    showApiResult('Connecting…');
+    try {
+      const res = await api.servers.testApi({ ...apiFields(), server_id: Number($('sId').value) || null });
+      showApiResult(`✓ Connected – Traccar ${res.version || ''}`);
+    } catch (err) {
+      showApiResult(err.message, false);
+    }
+  });
+
   $('serverForm').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const data = { name: $('sName').value.trim(), host: $('sHost').value.trim(), port: Number($('sPort').value) };
+    const data = {
+      name: $('sName').value.trim(), host: $('sHost').value.trim(), port: Number($('sPort').value), ...apiFields(),
+    };
     try {
       const id = $('sId').value;
       if (id) await api.servers.update(id, data);

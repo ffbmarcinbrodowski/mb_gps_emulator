@@ -43,6 +43,8 @@ class DeviceTableModel(QAbstractTableModel):
             if col == 0:
                 mode = "realistic" if d["realistic"] else "simple"
                 text = f"IMEI {d['imei']}\nOdometer {d['odometer_m'] / 1000:.1f} km\n{mode} driving, max {d['speed_kmh']:.0f} km/h"
+                if d["traccar_id"] is not None:
+                    text += f"\nCreated in Traccar (id {d['traccar_id']})"
                 if d["route"] and d["route"]["stops"]:
                     stops = d["route"]["stops"]
                     text += f"\nRoute: {d['route']['distance_m'] / 1000:.1f} km, {len(stops)} stop{'s' if len(stops) > 1 else ''}"

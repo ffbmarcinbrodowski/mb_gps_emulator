@@ -58,6 +58,12 @@ def servers_create():
     return jsonify(services.create_server(get_db(), request.get_json(force=True))), 201
 
 
+@app.post("/api/servers/test-api")
+def servers_test_api():
+    """Body: {api_url, api_user, api_password, server_id?} -> {"version": "6.15.3"} if the login works."""
+    return jsonify(services.test_traccar_api(get_db(), request.get_json(force=True)))
+
+
 @app.get("/api/servers/<int:server_id>")
 def servers_get(server_id):
     server = models.get_server(get_db(), server_id)
@@ -113,6 +119,12 @@ def devices_create():
 @app.put("/api/devices/<int:device_id>")
 def devices_update(device_id):
     return jsonify(services.update_device(get_db(), emulator, device_id, request.get_json(force=True)))
+
+
+@app.post("/api/devices/<int:device_id>/traccar")
+def devices_add_to_traccar(device_id):
+    """Create the device in Traccar through the server's API (or link the existing one)."""
+    return jsonify(services.add_to_traccar(get_db(), device_id))
 
 
 @app.delete("/api/devices/<int:device_id>")

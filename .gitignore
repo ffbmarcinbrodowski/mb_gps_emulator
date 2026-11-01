@@ -19,3 +19,6 @@ presentation/
 
 # GitHub token for update.sh (private repository)
 .github_token
+
+# ElevenLabs API key for the local presentation voiceover
+elevenlabs_api.txt

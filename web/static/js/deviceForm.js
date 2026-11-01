@@ -4,7 +4,7 @@ import { api } from './api.js';
 import { createMap, endpointMarker, routeLine, stopMarker } from './map.js';
 import { initObdForm } from './obdForm.js';
 import { initScenarioForm } from './scenarioForm.js';
-import { esc, fmtCoord, fmtDuration, fmtKm, parseLatLon } from './ui.js';
+import { esc, fmtCoord, fmtDuration, fmtKm, parseLatLon, toast } from './ui.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -29,6 +29,7 @@ export function initDeviceForm({ onSaved }) {
     layers: { start: null, end: null, stops: [], line: null },
     savedDurationS: 0,  // duration of the saved route (edit), used by the scenario preview
     savedRoute: null,   // the saved route (edit), summarized until a new route is generated
+    saved: null,        // the device as saved (edit): server and Traccar link
   };
   const scenario = initScenarioForm({
     deviceModal: modal,
@@ -267,7 +268,40 @@ export function initDeviceForm({ onSaved }) {
     const server = servers.find((s) => String(s.id) === $('fServer').value);
     $('fServerHost').value = server?.host ?? '';
     $('fServerPort').value = server?.port ?? '';
+    showTraccar(server);
   }
+
+  // ---- Traccar (only for servers with Traccar API access) ---------------------
+
+  function showTraccar(server) {
+    const saved = state.saved;
+    $('traccarBox').classList.toggle('d-none', !server?.has_api);
+    // New device: "Create in Traccar" when saving. Saved device: status or "Add to Traccar".
+    $('traccarCreateRow').classList.toggle('d-none', !!saved);
+    $('traccarExistingRow').classList.toggle('d-none', !saved);
+    if (!saved) return;
+    const sameServer = saved.server_id === server?.id;
+    const linked = sameServer && saved.traccar_id != null;
+    $('traccarStatus').textContent = linked ? `In Traccar (id ${saved.traccar_id})`
+      : sameServer ? 'Not linked to Traccar yet.' : 'Save the device first.';
+    $('btnAddTraccar').classList.toggle('d-none', linked || !sameServer);
+  }
+
+  $('btnAddTraccar').addEventListener('click', async () => {
+    const btn = $('btnAddTraccar');
+    btn.disabled = true;
+    try {
+      const res = await api.devices.addToTraccar(state.editingId);
+      state.saved = { ...state.saved, traccar_id: res.traccar_id };
+      showServerDetails();
+      toast(res.message, res.result === 'created' ? 'success' : 'info');
+      onSaved(state.saved);
+    } catch (err) {
+      showError(err.message);
+    } finally {
+      btn.disabled = false;
+    }
+  });
   $('fServer').addEventListener('change', showServerDetails);
 
   // ---- Open / save --------------------------------------------------------
@@ -284,6 +318,8 @@ export function initDeviceForm({ onSaved }) {
     toggleSaveButtons();
     state.savedDurationS = 0;
     state.savedRoute = null;
+    state.saved = null;
+    $('fTraccar').checked = true;
     if (map) drawLine(null);
     renderStops();
     setRouteInfo(HINT);
@@ -317,6 +353,7 @@ export function initDeviceForm({ onSaved }) {
     $('fInterval').value = device.interval_s;
     $('fSpeed').value = device.speed_kmh;
     $('fRealistic').checked = device.realistic;
+    state.saved = device;
     await loadServers(device.server_id);
 
     if (device.route) {
@@ -364,12 +401,17 @@ export function initDeviceForm({ onSaved }) {
     if (state.preview) payload.route = state.preview;
     // OBD only when edited: a running device keeps counting its mileage meanwhile.
     if (obd.value()) payload.obd = obd.value();
+    // New device on a server with Traccar API access: create it in Traccar too.
+    const server = servers.find((s) => s.id === payload.server_id);
+    if (!state.editingId && server?.has_api && $('fTraccar').checked) payload.traccar = true;
 
     try {
       const saved = state.editingId
         ? await api.devices.update(state.editingId, payload)
         : await api.devices.create(payload);
       onSaved(saved);
+      const tr = saved.traccar_result;
+      if (tr) toast(tr.message, tr.result === 'error' ? 'danger' : tr.result === 'created' ? 'success' : 'info');
       if (keepOpen) {
         resetForm();
         redraw(false);

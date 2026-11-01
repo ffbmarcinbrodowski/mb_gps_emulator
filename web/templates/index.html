@@ -152,6 +152,22 @@
               <label>Port</label>
               <input class="form-control form-control-sm" id="fServerPort" readonly>
             </div>
+            <!-- Only when the server has Traccar API access (Servers) -->
+            <div class="ms-1 d-none" id="traccarBox">
+              <div class="form-check d-none" id="traccarCreateRow">
+                <input class="form-check-input" type="checkbox" id="fTraccar" checked>
+                <label class="form-check-label" for="fTraccar">Create in Traccar</label>
+                <div class="form-text mt-0">
+                  Name, IMEI and model FMB920 (FMB003 with OBD). An existing device with this IMEI is only linked.
+                </div>
+              </div>
+              <div class="d-flex align-items-center gap-2 d-none" id="traccarExistingRow">
+                <span class="small flex-grow-1" id="traccarStatus"></span>
+                <button type="button" class="btn btn-sm btn-outline-secondary text-nowrap" id="btnAddTraccar">
+                  <i class="bi bi-cloud-upload"></i> Add to Traccar
+                </button>
+              </div>
+            </div>
             <div id="deviceFormError" class="alert alert-danger py-2 small d-none mt-3"></div>
           </form>
 
@@ -208,10 +224,31 @@
               <i class="bi bi-x-lg"></i>
             </button>
           </div>
+          <!-- Optional Traccar REST API access: lets the emulator create its devices in Traccar -->
+          <div class="col-12 small text-secondary mt-3">
+            Traccar API (optional) – to create emulator devices in Traccar directly
+          </div>
+          <div class="col-sm-4">
+            <input class="form-control form-control-sm" id="sApiUrl" placeholder="http://10.40.1.114:8082"
+                   aria-label="Traccar API address">
+          </div>
+          <div class="col-sm-3">
+            <input class="form-control form-control-sm" id="sApiUser" placeholder="Login (e-mail)"
+                   aria-label="Traccar login" autocomplete="off">
+          </div>
+          <div class="col-sm-3">
+            <input type="password" class="form-control form-control-sm" id="sApiPassword" placeholder="Password"
+                   aria-label="Traccar password" autocomplete="new-password">
+          </div>
+          <div class="col-sm-2">
+            <button class="btn btn-sm btn-outline-secondary w-100" type="button" id="btnServerTestApi">Test</button>
+          </div>
+          <div class="col-12 small" id="serverApiResult"></div>
         </form>
         <p class="small text-secondary mt-3 mb-0">
           Traccar listens for Teltonika devices on port <strong>5027</strong> by default.
-          Each device's IMEI must also be added as a device in Traccar.
+          Each device's IMEI must also be added as a device in Traccar – with the Traccar API access
+          the emulator can do that for you (it only creates devices, it never changes or deletes any).
         </p>
       </div>
     </div>
