@@ -25,14 +25,16 @@ class SettingsDialog(QDialog):
         key_row.addWidget(self.key, 1)
         key_row.addWidget(show)
 
-        link = QLabel('No key yet? Create a free one in the '
-                      '<a href="https://graphhopper.com/dashboard/">GraphHopper dashboard</a> '
-                      '(Sign up → API Keys → Add API Key).')
+        link = QLabel('Only needed for the public API (graphhopper.com) - our own server needs no key. '
+                      'Create a free key in the '
+                      '<a href="https://graphhopper.com/dashboard/">GraphHopper dashboard</a>.')
         link.setOpenExternalLinks(True)
         link.setWordWrap(True)
 
         self.url = QLineEdit(config.GRAPHHOPPER_ROUTE_URL)
-        self.url.setPlaceholderText("https://graphhopper.com/api/1/route")
+        self.url.setPlaceholderText(config.DEFAULT_ROUTE_URL)
+        self.url.setToolTip(f"Empty = own server ({config.DEFAULT_ROUTE_URL}).\n"
+                            f"Public API: {config.PUBLIC_ROUTE_URL} (needs an API key).")
 
         self.timezone = QComboBox()
         self.timezone.setEditable(True)

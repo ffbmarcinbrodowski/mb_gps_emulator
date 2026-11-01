@@ -43,7 +43,7 @@ def save_graphhopper(key, url):
     s.setValue(GRAPHHOPPER_KEY, key)
     s.setValue(GRAPHHOPPER_URL, url)
     config.GRAPHHOPPER_API_KEY = key
-    config.GRAPHHOPPER_ROUTE_URL = url or "https://graphhopper.com/api/1/route"
+    config.GRAPHHOPPER_ROUTE_URL = url or config.DEFAULT_ROUTE_URL
 
 
 def save_timezone(name):

@@ -94,6 +94,52 @@ class StopIndicesTest(unittest.TestCase):
         self.assertEqual(route["profile"]["max_speed"], [])
 
 
+class GraphHopperServerTest(unittest.TestCase):
+    """Own server (no key, no point limit, maybe no elevation) vs. the public API."""
+
+    def setUp(self):
+        graphhopper._no_elevation.clear()
+        self.requests = []
+
+    def _answer(self, url, params=None, **_kw):
+        params = list(params)
+        self.requests.append(params)
+        answer = mock.Mock(headers={"content-type": "application/json"})
+        if ("elevation", "true") in params and "graphhopper.com" not in url:
+            answer.status_code, answer.json.return_value = 400, {"message": "Elevation not supported!"}
+            return answer
+        points = [p[1] for p in params if p[0] == "point"]
+        coords = [[float(x.split(",")[1]), float(x.split(",")[0])] for x in points]
+        answer.status_code = 200
+        answer.json.return_value = {"paths": [{"points": {"coordinates": coords}, "distance": 100.0, "time": 10_000,
+                                               "details": {}, "snapped_waypoints": {"coordinates": coords}}]}
+        return answer
+
+    def _route(self, url, key="", stops=3):
+        waypoints = [[49.0 + i / 100, 7.0] for i in range(stops + 2)]
+        with mock.patch.object(config, "GRAPHHOPPER_ROUTE_URL", url), \
+                mock.patch.object(config, "GRAPHHOPPER_API_KEY", key), \
+                mock.patch.object(config, "GRAPHHOPPER_MAX_POINTS", None), \
+                mock.patch.object(graphhopper.requests, "get", side_effect=self._answer):
+            return graphhopper.generate_route(waypoints[0], waypoints[-1], via=waypoints[1:-1])
+
+    def test_own_server_without_key_limit_or_elevation(self):
+        route = self._route("http://10.40.1.114:8989/route", stops=8)
+        self.assertEqual(len(self.requests), 2)                       # with elevation, then without
+        self.assertTrue(all(name != "key" for params in self.requests for name, _ in params))
+        self.assertEqual(len(route["stop_indices"]), 8)               # all 10 points in one request
+        self.assertEqual(route["points"][0][2], 0)                     # no elevation -> altitude 0
+        self._route("http://10.40.1.114:8989/route")
+        self.assertEqual(len(self.requests), 3)                       # the server is remembered
+
+    def test_public_api_needs_a_key_and_is_split(self):
+        with self.assertRaises(graphhopper.RoutingError):
+            self._route(config.PUBLIC_ROUTE_URL)
+        self._route(config.PUBLIC_ROUTE_URL, key="secret", stops=6)   # 8 points -> 2 requests of <= 5
+        self.assertEqual(len(self.requests), 2)
+        self.assertTrue(all(("key", "secret") in params for params in self.requests))
+
+
 class ServicesStopsTest(unittest.TestCase):
     """Saving devices with stops - on a throwaway database, GraphHopper replaced by a fake."""
 

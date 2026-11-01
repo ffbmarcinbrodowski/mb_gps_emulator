@@ -58,14 +58,14 @@ It comes with two interfaces on top of the same core:
 
 ## Quick start (Docker)
 
-Requirements: Docker with the Compose plugin, and a free GraphHopper API key ([how to get one](#getting-a-free-graphhopper-api-key)).
+Requirements: Docker with the Compose plugin and a GraphHopper routing server ([see below](#routing-server)).
 
 ```bash
 git clone https://github.com/ffbmarcinbrodowski/mb_gps_emulator.git
 cd mb_gps_emulator
 
 cp .env.example .env
-# edit .env and set GRAPHHOPPER_API_KEY=<your key>
+# edit .env: GRAPHHOPPER_ROUTE_URL (own server) or GRAPHHOPPER_API_KEY (public API)
 
 docker compose up -d --build
 ```
@@ -107,7 +107,27 @@ The database lives on the host in `./data/emulator.db`. To back it up, copy that
 > | on another machine | its IP or hostname, e.g. `192.168.1.20` |
 > | the built-in fake server (see [below](#testing-without-traccar)) | `127.0.0.1`, port `5055` |
 
-## Getting a free GraphHopper API key
+## Routing server
+
+Routes come from our own GraphHopper server at `http://10.40.1.114:8989` (the default of
+`GRAPHHOPPER_ROUTE_URL`). It needs no API key and has no limit on the number of stops per route.
+Another server is set with `GRAPHHOPPER_ROUTE_URL`, e.g. `http://my-server:8989/route`.
+
+What the emulator needs from a GraphHopper server:
+
+- the `car` profile (`config.GRAPHHOPPER_PROFILE`),
+- the path details `average_speed`, `max_speed` and `road_class` for realistic road speeds
+  (without them every road is driven at a default speed),
+- elevation is optional: if the server answers "Elevation not supported", routes are requested
+  without it and the records carry altitude 0. To get real altitudes, enable elevation on the
+  server (e.g. `graph.elevation.provider: srtm`) and import the map again.
+
+The server must reach every device's area: the map data of our server covers roughly Saarland,
+Rhineland-Palatinate and Baden-Württemberg.
+
+### Using the public GraphHopper API instead
+
+Set `GRAPHHOPPER_ROUTE_URL=https://graphhopper.com/api/1/route` and an API key:
 
 1. Go to <https://www.graphhopper.com/> and click **Sign up**. An email and password are enough.
 2. Confirm your email and log in to the dashboard at <https://graphhopper.com/dashboard/>.
@@ -285,7 +305,7 @@ pip install -r requirements-desktop.txt
 python -m desktop
 ```
 
-- **GraphHopper key:** enter it in **Settings…**. The `GRAPHHOPPER_API_KEY` environment variable and `graphhopper_api.txt` also work.
+- **Routing:** the desktop app uses the same GraphHopper server by default. Another routing URL (and an API key for the public API) can be set in **Settings…**. The environment variables and `graphhopper_api.txt` also work.
 - **Data:** the desktop app keeps its own database in the user's app data folder (the path is shown in the status bar and in Settings), separate from the web app. Set `EMULATOR_DB` to use another file.
 - **Internet:** the map (OpenStreetMap tiles, Leaflet) and route generation need an internet connection.
 
@@ -302,15 +322,16 @@ python3 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
-export GRAPHHOPPER_API_KEY=your-key-here
+export GRAPHHOPPER_ROUTE_URL=http://10.40.1.114:8989/route   # optional, this is the default
 python seed.py                      # optional: demo servers + 3 devices
 python -m web                       # http://localhost:5057
 ```
 
-Instead of the environment variable, you can put the key in a file named `graphhopper_api.txt`:
+Instead of environment variables, you can put the settings in a file named `graphhopper_api.txt`:
 
 ```
-GRAPHHOPPER_API_KEY = 'your-key-here'
+GRAPHHOPPER_ROUTE_URL = 'http://10.40.1.114:8989/route'
+GRAPHHOPPER_API_KEY = 'your-key-here'      # only for the public API
 ```
 
 `seed.py` adds demo devices around Saarbrücken, Germany. It uses straight-line routes if GraphHopper is not configured.
@@ -333,9 +354,9 @@ docker compose exec emulator python tools/fake_server.py     # inside the contai
 
 | Variable | Default | Description |
 |---|---|---|
-| `GRAPHHOPPER_API_KEY` | – | GraphHopper API key (required for routing) |
-| `GRAPHHOPPER_ROUTE_URL` | `https://graphhopper.com/api/1/route` | Routing endpoint; also works with a self-hosted GraphHopper |
-| `GRAPHHOPPER_MAX_POINTS` | `5` | Points per routing request your plan allows (free plan: 5); routes with more stops are requested in parts |
+| `GRAPHHOPPER_ROUTE_URL` | `http://10.40.1.114:8989/route` | Routing endpoint: our own GraphHopper server, or `https://graphhopper.com/api/1/route` |
+| `GRAPHHOPPER_API_KEY` | – | Only for the public API on graphhopper.com (not sent to other servers) |
+| `GRAPHHOPPER_MAX_POINTS` | no limit (graphhopper.com: `5`) | Points per routing request; routes with more stops are requested in parts |
 | `EMULATOR_PORT` | `5057` | Web port |
 | `EMULATOR_HOST` | `0.0.0.0` | Bind address |
 | `EMULATOR_TIMEZONE` | the computer's zone (UTC in Docker) | Time zone of scenario times, e.g. `Europe/Berlin` |
@@ -427,7 +448,7 @@ Dockerfile, docker-compose.yml
 
 ## Security
 
-The web app has **no authentication**. Run it only in a trusted local network or behind a VPN or reverse proxy with authentication. Anyone who can open it can control devices and use your GraphHopper quota.
+The web app has **no authentication**. Run it only in a trusted local network or behind a VPN or reverse proxy with authentication. Anyone who can open it can control devices and request routes from your GraphHopper server.
 
 ## License
 

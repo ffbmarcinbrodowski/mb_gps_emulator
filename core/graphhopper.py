@@ -1,5 +1,6 @@
 """
-Route generation with the GraphHopper Routing API.
+Route generation with the GraphHopper Routing API - our own server by default
+(config.GRAPHHOPPER_ROUTE_URL), or the public API on graphhopper.com.
 
 Docs: https://docs.graphhopper.com/#tag/Routing-API
 """
@@ -11,6 +12,10 @@ from . import config, geo
 # Per-segment road data used by core/motion.py for a realistic speed profile.
 # GraphHopper returns each as intervals: [[from_point, to_point, value], ...]
 PROFILE_DETAILS = ("average_speed", "max_speed", "road_class")
+PUBLIC_MAX_POINTS = 5           # points per request on graphhopper.com (free plan)
+
+# Servers without elevation data (answered "Elevation not supported!") - asked without it.
+_no_elevation = set()
 
 
 class RoutingError(Exception):
@@ -26,36 +31,53 @@ def generate_route(start, end, profile=None, via=()):
              "profile": {"average_speed": [...], "max_speed": [...], "road_class": [...]},
              "stop_indices": [index into points of every via point]}
     """
-    if not config.GRAPHHOPPER_API_KEY:
+    if is_public() and not config.GRAPHHOPPER_API_KEY:
         raise RoutingError("GraphHopper API key missing (see graphhopper_api.txt)")
 
-    # The plan limits the points per request: ask for overlapping parts (the last point of
-    # one part is the first of the next) and join them.
+    # A limit on points per request (public API): ask for overlapping parts (the last point
+    # of one part is the first of the next) and join them.
     waypoints = [start, *via, end]
-    step = config.GRAPHHOPPER_MAX_POINTS - 1
+    step = (max_points() or len(waypoints)) - 1
     parts = [_request(waypoints[i:i + step + 1], profile) for i in range(0, len(waypoints) - 1, step)]
     return _join(parts)
 
 
+def is_public():
+    """Is the route URL the public GraphHopper API (key required, few points per request)?"""
+    return "graphhopper.com" in config.GRAPHHOPPER_ROUTE_URL
+
+
+def max_points():
+    """Points per request: GRAPHHOPPER_MAX_POINTS, else 5 on graphhopper.com and no limit (None) elsewhere."""
+    return config.GRAPHHOPPER_MAX_POINTS or (PUBLIC_MAX_POINTS if is_public() else None)
+
+
 def _request(waypoints, profile):
     """One GraphHopper request through all `waypoints` (first = start, last = end)."""
+    url = config.GRAPHHOPPER_ROUTE_URL
+    elevation = url not in _no_elevation
     params = [
         *[("point", f"{lat},{lon}") for lat, lon in waypoints],
         ("profile", profile or config.GRAPHHOPPER_PROFILE),
         ("points_encoded", "false"),   # plain GeoJSON coordinates
-        ("elevation", "true"),
+        ("elevation", "true" if elevation else "false"),
         ("instructions", "false"),
         ("locale", "en"),
-        ("key", config.GRAPHHOPPER_API_KEY),
         *[("details", name) for name in PROFILE_DETAILS],
     ]
+    if is_public():
+        params.append(("key", config.GRAPHHOPPER_API_KEY))   # our own server needs no key
     try:
-        resp = requests.get(config.GRAPHHOPPER_ROUTE_URL, params=params, timeout=20)
+        resp = requests.get(url, params=params, timeout=20)
     except requests.RequestException as exc:
-        raise RoutingError(f"GraphHopper request failed: {exc}") from exc
+        raise RoutingError(f"GraphHopper request failed ({url}): {exc}") from exc
 
     body = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
     if resp.status_code != 200:
+        if elevation and "elevation not supported" in str(body.get("message", "")).lower():
+            # The server has no elevation data: route without it (altitude 0 in the records).
+            _no_elevation.add(url)
+            return _request(waypoints, profile)
         raise RoutingError(body.get("message") or f"GraphHopper HTTP {resp.status_code}")
     if not body.get("paths"):
         raise RoutingError("GraphHopper returned no route")

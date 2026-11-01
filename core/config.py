@@ -1,11 +1,11 @@
 """
 Application configuration.
 
-GraphHopper credentials are read from `graphhopper_api.txt` (project root),
-which contains lines like:
+Routes come from our own GraphHopper server (DEFAULT_ROUTE_URL). Another server or
+the public GraphHopper API can be set in `graphhopper_api.txt` (project root):
 
     GRAPHHOPPER_ROUTE_URL = 'https://graphhopper.com/api/1/route'
-    GRAPHHOPPER_API_KEY = 'your-key'
+    GRAPHHOPPER_API_KEY = 'your-key'      # only needed for graphhopper.com
 
 Environment variables with the same names override the file.
 """
@@ -31,9 +31,10 @@ DEFAULT_SPEED_KMH = 50        # average speed along the route
 SPEED_VARIATION = 0.15        # +/- 15 % random speed noise per tick
 TCP_TIMEOUT_S = 5             # connect / ack timeout for the Teltonika client
 GRAPHHOPPER_PROFILE = "car"   # car, bike, foot ... (depends on your plan)
-# Points per routing request allowed by the GraphHopper plan (free plan: 5). Routes with more
-# stops are requested in parts and joined (core/graphhopper.py).
-GRAPHHOPPER_MAX_POINTS = max(2, int(os.environ.get("GRAPHHOPPER_MAX_POINTS", "5")))
+# Points per routing request. Empty = no limit on an own server, 5 on graphhopper.com (free plan).
+# Routes with more stops are requested in parts and joined (core/graphhopper.py).
+GRAPHHOPPER_MAX_POINTS = max(2, int(os.environ["GRAPHHOPPER_MAX_POINTS"])) \
+    if os.environ.get("GRAPHHOPPER_MAX_POINTS") else None
 
 
 def _local_timezone():
@@ -65,8 +66,9 @@ def _load_key_file(path):
 
 _keys = _load_key_file(API_KEYS_FILE)
 
-GRAPHHOPPER_ROUTE_URL = os.environ.get(
-    "GRAPHHOPPER_ROUTE_URL",
-    _keys.get("GRAPHHOPPER_ROUTE_URL", "https://graphhopper.com/api/1/route"),
-)
+# Own GraphHopper server in the local network (no API key, no limit on points per route).
+DEFAULT_ROUTE_URL = "http://10.40.1.114:8989/route"
+PUBLIC_ROUTE_URL = "https://graphhopper.com/api/1/route"
+
+GRAPHHOPPER_ROUTE_URL = os.environ.get("GRAPHHOPPER_ROUTE_URL") or _keys.get("GRAPHHOPPER_ROUTE_URL") or DEFAULT_ROUTE_URL
 GRAPHHOPPER_API_KEY = os.environ.get("GRAPHHOPPER_API_KEY", _keys.get("GRAPHHOPPER_API_KEY", ""))

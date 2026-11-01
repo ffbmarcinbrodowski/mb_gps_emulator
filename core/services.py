@@ -87,7 +87,7 @@ def parse_device(db, data):
     }
 
 
-MAX_STOPS = 20
+MAX_STOPS = 50       # a sanity limit; the public GraphHopper API gets them in parts
 
 
 def parse_stops(value):

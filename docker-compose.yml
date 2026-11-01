@@ -2,7 +2,7 @@
 #
 #   docker compose up -d --build     ->  http://<host-ip>:5057
 #
-# GraphHopper key: in .env (see .env.example).
+# Routing server (own GraphHopper, or the public API + key): in .env (see .env.example).
 # Data: ./data/emulator.db (copy an existing emulator.db there to keep your devices).
 
 services:
