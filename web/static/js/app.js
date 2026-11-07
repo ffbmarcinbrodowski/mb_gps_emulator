@@ -17,6 +17,7 @@ const state = {
   routeLayer: null,   // route of the selected device (polyline + start/end)
   routeKey: null,     // "<device id>:<route id>" currently drawn
   firstLoad: true,
+  search: '',         // text of the search field; the server filters the list (core.models.device_matches)
 };
 
 const map = createMap('mainMap');
@@ -33,12 +34,16 @@ const historyDialog = initHistory({ onFinished: refresh });
 // ---- Data loading -----------------------------------------------------------
 
 async function refresh() {
+  const search = state.search;
+  let devices;
   try {
-    state.devices = await api.devices.list();
+    devices = await api.devices.list(search);
   } catch (err) {
     console.error(err);
     return;
   }
+  if (search !== state.search) return; // the text changed meanwhile - a newer refresh follows
+  state.devices = devices;
   if (!state.devices.some((d) => d.id === state.selectedId)) {
     state.selectedId = state.devices[0]?.id ?? null;
   }
@@ -52,7 +57,9 @@ async function refresh() {
 
 function renderList() {
   const list = $('deviceList');
-  if (!state.devices.length) {
+  if (!state.devices.length && state.search) {
+    list.innerHTML = `<div class="text-secondary p-3">No device matches “${esc(state.search)}”.</div>`;
+  } else if (!state.devices.length) {
     list.innerHTML = '<div class="text-secondary p-3">No devices yet – click <i class="bi bi-plus-lg"></i> to add one.</div>';
   } else {
     list.innerHTML = state.devices.map(deviceCard).join('');
@@ -107,6 +114,16 @@ function stopsText(route) {
   const n = route?.stops.length;
   return n ? ` · ${n} stop${n > 1 ? 's' : ''}` : '';
 }
+
+// Search field: reload the list shortly after typing stops (Esc / the x clears it).
+let searchTimer = null;
+$('deviceSearch').addEventListener('input', (e) => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => {
+    state.search = e.target.value.trim();
+    refresh();
+  }, 250);
+});
 
 $('deviceList').addEventListener('click', async (e) => {
   const card = e.target.closest('.device-card');

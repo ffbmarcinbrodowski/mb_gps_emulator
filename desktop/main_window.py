@@ -10,7 +10,7 @@ import webbrowser
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
-    QAbstractItemView, QHBoxLayout, QHeaderView, QLabel, QMainWindow, QMenu, QMessageBox,
+    QAbstractItemView, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox,
     QSplitter, QSystemTrayIcon, QTableView, QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -96,10 +96,15 @@ class MainWindow(QMainWindow):
 
         devices_header = QLabel("Devices")
         devices_header.setStyleSheet(HEADER_STYLE)
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Search: name, IMEI, VIN, server")
+        self.search.setClearButtonEnabled(True)
+        self.search.textChanged.connect(lambda _: self._apply_search())
         left = QWidget()
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.addWidget(devices_header)
+        left_layout.addWidget(self.search)
         left_layout.addWidget(self.table)
 
         # Right: map with a header showing the selected device
@@ -230,8 +235,23 @@ class MainWindow(QMainWindow):
         self.model.set_devices(models.list_devices(self.db))
         if self.model.row_of(self.selected_id) < 0:
             self.selected_id = self.model.devices[0]["id"] if self.model.devices else None
+        self._apply_search(fit=fit)
+
+    def _visible_devices(self):
+        """Devices matching the search field (the table hides the other rows)."""
+        return [d for d in self.model.devices if models.device_matches(d, self.search.text())]
+
+    def _apply_search(self, fit=False):
+        """Hide table rows and map markers of devices that don't match the search field."""
+        visible = self._visible_devices()
+        ids = {d["id"] for d in visible}
+        for row, d in enumerate(self.model.devices):
+            self.table.setRowHidden(row, d["id"] not in ids)
+        if self.selected_id not in ids:
+            self.selected_id = visible[0]["id"] if visible else None
+            self.table.clearSelection()
         self._restore_selection()
-        self.map.set_devices(self.model.devices, fit=fit)
+        self.map.set_devices(visible, fit=fit)
         self._refresh_selected(fit_route=fit)
 
     def _device_changed(self, device_id):
@@ -250,8 +270,7 @@ class MainWindow(QMainWindow):
             self.model.upsert(new)
             self._notify(old, new)
         self._dirty.clear()
-        self.map.set_devices(self.model.devices)
-        self._refresh_selected()
+        self._apply_search()
 
     def _restore_selection(self):
         row = self.model.row_of(self.selected_id)

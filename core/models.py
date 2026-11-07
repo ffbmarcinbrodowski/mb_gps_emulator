@@ -263,9 +263,23 @@ def device_to_dict(db, row, include_points=False):
     }
 
 
-def list_devices(db):
+def list_devices(db, search=""):
+    """All devices by name; `search` keeps only those that match (see device_matches)."""
     rows = db.execute(DEVICE_QUERY + " ORDER BY d.name").fetchall()
-    return [device_to_dict(db, r) for r in rows]
+    devices = [device_to_dict(db, r) for r in rows]
+    return [d for d in devices if device_matches(d, search)] if search.strip() else devices
+
+
+def device_matches(device, search):
+    """
+    Device search (same in both UIs): every word of `search` must appear, ignoring case, in
+    the name, IMEI, VIN or server (name, host) of the device. "mb 78" finds "SB MB 7825".
+    Empty text matches every device.
+    """
+    server = device["server"] or {}
+    text = " ".join([device["name"], device["imei"], device["obd"]["vin"],
+                     server.get("name") or "", server.get("host") or ""]).lower()
+    return all(word in text for word in search.lower().split())
 
 
 def get_device(db, device_id, include_points=True):

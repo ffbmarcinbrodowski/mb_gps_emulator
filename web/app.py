@@ -88,7 +88,8 @@ def servers_delete(server_id):
 @app.get("/api/devices")
 def devices_list():
     # Without route points - this endpoint is polled by the UI every few seconds.
-    return jsonify(models.list_devices(get_db()))
+    # ?q=text = only devices matching the search field.
+    return jsonify(models.list_devices(get_db(), request.args.get("q", "")))
 
 
 @app.get("/api/devices/new-imei")

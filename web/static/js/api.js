@@ -16,7 +16,7 @@ async function request(method, url, body) {
 
 export const api = {
   devices: {
-    list: () => request('GET', '/api/devices'),
+    list: (q = '') => request('GET', q ? `/api/devices?q=${encodeURIComponent(q)}` : '/api/devices'),
     get: (id) => request('GET', `/api/devices/${id}`),
     newImei: () => request('GET', '/api/devices/new-imei'),
     newVin: () => request('GET', '/api/devices/new-vin'),

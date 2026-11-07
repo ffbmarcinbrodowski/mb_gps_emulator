@@ -168,6 +168,8 @@ allowed use.
      schedule instead (see [Scenarios](#scenarios)). The scenario window shows the next departures.
 3. Click **Start** on a device, or **Start all**.
 4. **Events:** select a running device and use **Event ▾** in the map header.
+5. **Search:** type in the field above the device list to show only matching devices (list and map).
+   It looks in the name, IMEI, VIN and server; every word must match, e.g. `mb 78` finds `SB MB 7825`.
 
 Device status: **Ready** (not started) · **Running** · **Paused** (stopped halfway; Start resumes) · **Finished** (Start drives the route again).
 
@@ -422,7 +424,7 @@ section of variable-length values (VIN, fault codes).
 | GET, PUT, DELETE | `/api/servers/<id>` | Read / update / delete (optional `api_url`, `api_user`, `api_password`: Traccar API access) |
 | POST | `/api/servers/test-api` | `{api_url, api_user, api_password, server_id?}` → `{version}` if the Traccar login works |
 | POST | `/api/devices/<id>/traccar` | Create the device in Traccar through the server's API (or link the existing one) |
-| GET, POST | `/api/devices` | List / create a device (route: `start`, `end`, optional `stops: [{point: [lat, lon], dwell_min: 5}, ...]`) |
+| GET, POST | `/api/devices` | List (optional `?q=text`: search in name, IMEI, VIN, server) / create a device (route: `start`, `end`, optional `stops: [{point: [lat, lon], dwell_min: 5}, ...]`) |
 | GET, PUT, DELETE | `/api/devices/<id>` | Read (incl. route points) / update / delete |
 | POST | `/api/routes` | `{start: [lat, lon], end: [lat, lon], via: [[lat, lon], ...]}` → route preview through the stops |
 | GET | `/api/routes/<id>` | Saved route |
