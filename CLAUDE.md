@@ -4,9 +4,11 @@ Emulator nadajników GPS Teltonika: wirtualne urządzenia jeżdżą realistyczni
 dane AVL Codec 8 po TCP do Traccara. Wspólny rdzeń `core/`, interfejsy: `web/` (Flask, Docker) i `desktop/` (PySide6).
 Dokumentacja dla użytkowników: `README.md`.
 
-## Zanim zaczniesz – folder `referenz/`
+## Zanim zaczniesz – folder `referenz/` (tylko lokalnie)
 
-Pełny kontekst projektu jest w `referenz/` (po polsku). Czytaj w tej kolejności:
+`referenz/` to lokalne notatki projektu (po polsku), celowo **poza Gitem** (`.gitignore`) – w publicznym repo
+i w świeżym klonie go nie ma. Jeśli folder nie istnieje, pomiń ten punkt i pracuj na kodzie, README i tym pliku.
+Nigdy nie dodawaj go do repozytorium. Jeśli istnieje, czytaj w tej kolejności:
 
 1. **`referenz/STAN.md`** – co jest zrobione, decyzje i ich powody, otwarte tematy, środowisko, pliki poza Gitem.
    Przeczytaj na początku każdej nowej sesji.
@@ -41,6 +43,6 @@ migracje testuj na kopii zrobionej przez SQLite `backup()`.
 - Przed większą zmianą **kopia zapasowa** do `backup/<data_godzina>/` (baza przez SQLite `backup()`).
 - Zmiany weryfikuj naprawdę (testy, fake server, zrzuty Playwright, Qt offscreen) i mów wprost, czego nie sprawdziłeś.
 - **Git: commit/push tylko na prośbę.** Przed commitem `git status`, pliki dodawane **jawnie** (nie `git add -A`),
-  skan pod kątem klucza GraphHoppera. Nigdy do Gita: `.env`, `graphhopper_api.txt`, `emulator.db`, `backup/`,
-  `presentation/`.
+  skan pod kątem klucza GraphHoppera. Nigdy do Gita: `.env`, `graphhopper_api.txt`, `elevenlabs_api.txt`,
+  `Traccar_login.txt`, `emulator.db`, `backup/`, `presentation/`, `referenz/`. Repozytorium jest **publiczne**.
 - Prezentacja (`presentation/`) jest tylko lokalna – nie publikować w żadnej formie.
