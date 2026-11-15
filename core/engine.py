@@ -132,7 +132,7 @@ class DeviceWorker(threading.Thread):
         self._update(scenario_enabled=1)
 
         # Armed now: stand where the plan says the vehicle should be (or leave at once).
-        leg_s = scenarios.leg_seconds(self.route["duration_s"], models.stops_seconds(self.route))
+        leg_s = models.leg_duration(self.route)
         location, drive_now = scenarios.initial_position(cfg, datetime.now(tz), leg_s, seed)
         if cfg["type"] == "loop":
             # A loop has no fixed plan - continue from the end of the route the vehicle is at.

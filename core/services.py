@@ -105,6 +105,8 @@ def parse_device(db, data):
         "start": _point(data, "start"),
         "end": _point(data, "end"),
         "stops": parse_stops(data.get("stops")),
+        # Stops on the return route B -> A. None = not sent (the UI form) -> keep the stored ones.
+        "return_stops": parse_stops(data.get("return_stops")) if "return_stops" in data else None,
     }
 
 
@@ -356,11 +358,14 @@ def create_device(db, data):
         raise ServiceError("A device with this IMEI already exists", 409)
 
     route = _route_for(data, device["start"], device["end"], device["stops"])
-    # Scenarios drive back and forth: B -> A gets its own route (one-way streets differ).
-    # It goes straight back, without the stops.
-    return_route = generate_route(device["end"], device["start"]) if device["scenario"] else None
+    # Scenarios drive back and forth: B -> A gets its own route (one-way streets differ),
+    # through its own stops (return_stops) or straight back.
+    return_stops = device["return_stops"] or []
+    return_route = (generate_route(device["end"], device["start"], [s["point"] for s in return_stops])
+                    if device["scenario"] else None)
     device_id = models.create_device(db, device)
-    models.save_route(db, device_id, device["start"], device["end"], route, return_route, device["stops"])
+    models.save_route(db, device_id, device["start"], device["end"], route, return_route, device["stops"],
+                      return_stops)
     db.commit()
 
     # "Create in Traccar": the device is saved anyway - a Traccar error is only reported.
@@ -394,8 +399,13 @@ def update_device(db, emulator, device_id, data):
     new_route = None
     if route_changed or needs_profile or data.get("route"):
         new_route = _route_for(data, device["start"], device["end"], device["stops"])
-    needs_return = device["scenario"] and (new_route is not None or not old["has_return"])
-    return_route = generate_route(device["end"], device["start"]) if needs_return else None
+    # Return stops: sent ones replace the stored ones; not sent (UI form) = keep them.
+    return_stops = device["return_stops"] if device["return_stops"] is not None else (
+        old["return_stops"] if old else [])
+    return_changed = old is None or [s["point"] for s in old["return_stops"]] != [s["point"] for s in return_stops]
+    needs_return = device["scenario"] and (new_route is not None or not old["has_return"] or return_changed)
+    return_route = (generate_route(device["end"], device["start"], [s["point"] for s in return_stops])
+                    if needs_return else None)
 
     # A running worker uses the old settings -> stop it, save, restart it.
     was_running = emulator.is_running(device_id)
@@ -405,12 +415,14 @@ def update_device(db, emulator, device_id, data):
     models.update_device(db, device_id, device)
     if new_route:
         models.save_route(db, device_id, device["start"], device["end"], new_route, return_route,
-                          device["stops"])
+                          device["stops"], return_stops)
     else:
         # Same stops, maybe other waiting times - the route itself stays.
         models.set_stop_dwell(db, device_id, device["stops"])
         if return_route:
-            models.set_return_route(db, device_id, return_route)
+            models.set_return_route(db, device_id, return_route, return_stops)
+        elif old["has_return"]:
+            models.set_stop_dwell(db, device_id, return_stops, "return_stops")
     if not device["scenario"]:
         models.set_armed(db, device_id, False)
     db.commit()

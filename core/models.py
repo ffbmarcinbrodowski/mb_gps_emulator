@@ -7,7 +7,7 @@ import json
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-from . import config
+from . import config, scenarios
 
 
 def local_time(utc_text):
@@ -94,6 +94,9 @@ def route_to_dict(row, include_points=False):
         "return_distance_m": row["return_distance_m"],
         # Stops between start and end: [{"point": [lat, lon], "dwell_min": 5}, ...]
         "stops": [{"point": [s["lat"], s["lon"]], "dwell_min": s["dwell_min"]} for s in _stops(row)],
+        # Stops on the return route B -> A (same format; empty = straight back)
+        "return_stops": [{"point": [s["lat"], s["lon"]], "dwell_min": s["dwell_min"]}
+                         for s in _stops(row, "return_stops")],
     }
     if include_points:
         result["points"] = json.loads(row["points"])
@@ -106,8 +109,15 @@ def get_route(db, route_id, include_points=True):
     return route_to_dict(row, include_points) if row else None
 
 
-def _stops(route_row):
-    return json.loads(route_row["stops"]) if route_row["stops"] else []
+def _column(route_row, column):
+    """Value of a routes column - None if the row (or a plain dict in tests) doesn't have it."""
+    return route_row[column] if column in route_row.keys() else None
+
+
+def _stops(route_row, column="stops"):
+    """Stops of A -> B ("stops") or B -> A ("return_stops") as stored: [{"lat", "lon", "dwell_min", "index"}]."""
+    value = _column(route_row, column)
+    return json.loads(value) if value else []
 
 
 def _stops_json(stops, indices):
@@ -118,7 +128,7 @@ def _stops_json(stops, indices):
                        for s, i in zip(stops, indices)])
 
 
-def save_route(db, device_id, start, end, route, return_route=None, stops=()):
+def save_route(db, device_id, start, end, route, return_route=None, stops=(), return_stops=()):
     """
     Insert or replace the route of a device (and its return route). Resets the device's progress.
     stops: [{"point": [lat, lon], "dwell_min": n}] in driving order; route["stop_indices"] says
@@ -134,7 +144,7 @@ def save_route(db, device_id, start, end, route, return_route=None, stops=()):
          json.dumps(profile) if profile else None, _stops_json(stops, route.get("stop_indices") or [])),
     )
     if return_route:
-        set_return_route(db, device_id, return_route)
+        set_return_route(db, device_id, return_route, return_stops)
     first = route["points"][0]
     db.execute(
         "UPDATE devices SET progress_m = 0, status = 'stopped', direction = 'forward', current_lat = ?,"
@@ -143,42 +153,62 @@ def save_route(db, device_id, start, end, route, return_route=None, stops=()):
     )
 
 
-def set_stop_dwell(db, device_id, stops):
-    """New waiting times for the same stops (the route itself stays as it is)."""
-    row = db.execute("SELECT stops FROM routes WHERE device_id = ?", (device_id,)).fetchone()
-    indices = [s["index"] for s in _stops(row)]
-    db.execute("UPDATE routes SET stops = ? WHERE device_id = ?", (_stops_json(stops, indices), device_id))
+def set_stop_dwell(db, device_id, stops, column="stops"):
+    """New waiting times for the same stops (the route itself stays as it is).
+    column: "stops" (A -> B) or "return_stops" (B -> A)."""
+    if column not in ("stops", "return_stops"):
+        raise ValueError(column)
+    row = db.execute(f"SELECT {column} FROM routes WHERE device_id = ?", (device_id,)).fetchone()
+    indices = [s["index"] for s in _stops(row, column)]
+    db.execute(f"UPDATE routes SET {column} = ? WHERE device_id = ?", (_stops_json(stops, indices), device_id))
 
 
 def route_leg(route_row, direction):
     """
     What the vehicle drives on A -> B ("forward") or B -> A ("return"):
     (points, road profile, stops [(route point index, seconds waiting)]).
-    The return route goes straight back without stops.
+    The return route has its own stops (return_stops) or goes straight back.
     """
     if direction == "return":
-        if route_row["return_points"]:
+        if _column(route_row, "return_points"):
             profile = json.loads(route_row["return_profile"]) if route_row["return_profile"] else None
-            return json.loads(route_row["return_points"]), profile, []
+            stops = [(s["index"], s["dwell_min"] * 60) for s in _stops(route_row, "return_stops")
+                     if s["dwell_min"] > 0]
+            return json.loads(route_row["return_points"]), profile, stops
         return list(reversed(json.loads(route_row["points"]))), None, []   # old data without a return route
     profile = json.loads(route_row["profile"]) if route_row["profile"] else None
     stops = [(s["index"], s["dwell_min"] * 60) for s in _stops(route_row) if s["dwell_min"] > 0]
     return json.loads(route_row["points"]), profile, stops
 
 
-def stops_seconds(route_row):
-    """Total waiting time at the stops of A -> B (for the expected trip duration of scenarios)."""
-    return sum(s["dwell_min"] * 60 for s in _stops(route_row))
+def stops_seconds(route_row, direction="forward"):
+    """Total waiting time at the stops of A -> B or B -> A (for the expected trip duration of scenarios)."""
+    column = "return_stops" if direction == "return" else "stops"
+    return sum(s["dwell_min"] * 60 for s in _stops(route_row, column))
 
 
-def set_return_route(db, device_id, route):
-    """Store the B -> A route next to the A -> B route."""
+def leg_duration(route_row):
+    """
+    Expected duration of the longer of both drives (scenarios.leg_seconds) - scenarios use one value
+    to decide where the vehicle should stand when armed and to warn about overlapping departures.
+    """
+    forward = scenarios.leg_seconds(route_row["duration_s"], stops_seconds(route_row))
+    if not _column(route_row, "return_points"):
+        return forward
+    back = scenarios.leg_seconds(_column(route_row, "return_duration_s") or route_row["duration_s"],
+                                 stops_seconds(route_row, "return"))
+    return max(forward, back)
+
+
+def set_return_route(db, device_id, route, stops=()):
+    """Store the B -> A route next to the A -> B route (with its stops, route["stop_indices"])."""
     profile = route.get("profile")
     db.execute(
-        "UPDATE routes SET return_points = ?, return_distance_m = ?, return_duration_s = ?, return_profile = ?"
-        " WHERE device_id = ?",
+        "UPDATE routes SET return_points = ?, return_distance_m = ?, return_duration_s = ?, return_profile = ?,"
+        " return_stops = ? WHERE device_id = ?",
         (json.dumps(route["points"]), route["distance_m"], route["duration_s"],
-         json.dumps(profile) if profile else None, device_id),
+         json.dumps(profile) if profile else None, _stops_json(stops, route.get("stop_indices") or []),
+         device_id),
     )
 
 

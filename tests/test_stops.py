@@ -223,5 +223,72 @@ class ServicesStopsTest(unittest.TestCase):
         self.assertTrue(any("longer than the interval" in w for w in long["warnings"]))
 
 
+class ReturnStopsTest(ServicesStopsTest):
+    """Stops on the return route B -> A (migration 008): own order, own waiting times."""
+
+    SCENARIO = {"type": "times", "times": ["07:00", "15:00"], "days": [0, 1, 2, 3, 4]}
+
+    def _with_return(self, stops, return_stops, **extra):
+        data = self._payload(stops)
+        data.update(scenario=self.SCENARIO, return_stops=return_stops, **extra)
+        return data
+
+    def _row(self, device_id):
+        return self.db.execute("SELECT * FROM routes WHERE device_id = ?", (device_id,)).fetchone()
+
+    def test_return_route_goes_through_its_own_stops(self):
+        stops = [{"point": [49.1, 7.1], "dwell_min": 2}, {"point": [49.2, 7.2], "dwell_min": 2}]
+        back = [{"point": [49.2, 7.2], "dwell_min": 3}, {"point": [49.1, 7.1], "dwell_min": 0}]
+        device = services.create_device(self.db, self._with_return(stops, back))
+        self.assertEqual(self.calls[-1], [[49.2, 7.2], [49.1, 7.1]])     # B -> A via the return stops
+        self.assertEqual(device["route"]["return_stops"], back)
+        row = self._row(device["id"])
+        points, _profile, leg_stops = models.route_leg(row, "return")
+        self.assertEqual(leg_stops, [(1, 180)])                          # 0 min = drive through
+        self.assertEqual(points[1][:2], [49.2, 7.2])
+        self.assertEqual(models.stops_seconds(row, "return"), 180)
+        self.assertEqual(models.stops_seconds(row), 240)
+
+    def test_without_return_stops_it_goes_straight_back(self):
+        device = services.create_device(self.db, self._with_return([{"point": [49.1, 7.1], "dwell_min": 2}], None))
+        self.assertEqual(self.calls[-1], [])
+        self.assertEqual(device["route"]["return_stops"], [])
+        self.assertEqual(models.route_leg(self._row(device["id"]), "return")[2], [])
+
+    def test_form_without_the_key_keeps_the_return_stops(self):
+        back = [{"point": [49.15, 7.15], "dwell_min": 4}]
+        device = services.create_device(self.db, self._with_return([], back))
+        calls = len(self.calls)
+        data = self._payload([])
+        data["scenario"] = self.SCENARIO                                   # like the UI: no "return_stops"
+        updated = services.update_device(self.db, self.emulator, device["id"], data)
+        self.assertEqual(len(self.calls), calls)                           # nothing routed again
+        self.assertEqual(updated["route"]["return_stops"], back)
+
+    def test_changed_return_stops_reroute_only_the_return(self):
+        device = services.create_device(self.db, self._with_return([], [{"point": [49.15, 7.15], "dwell_min": 4}]))
+        route_id = device["route"]["id"]
+        updated = services.update_device(self.db, self.emulator, device["id"],
+                                         self._with_return([], [{"point": [49.25, 7.25], "dwell_min": 1}]))
+        self.assertEqual(self.calls[-1], [[49.25, 7.25]])
+        self.assertEqual(updated["route"]["id"], route_id)                 # A -> B kept
+        self.assertEqual(updated["route"]["return_stops"], [{"point": [49.25, 7.25], "dwell_min": 1}])
+
+    def test_only_the_waiting_time_changes(self):
+        device = services.create_device(self.db, self._with_return([], [{"point": [49.15, 7.15], "dwell_min": 4}]))
+        calls = len(self.calls)
+        updated = services.update_device(self.db, self.emulator, device["id"],
+                                         self._with_return([], [{"point": [49.15, 7.15], "dwell_min": 9}]))
+        self.assertEqual(len(self.calls), calls)
+        self.assertEqual(updated["route"]["return_stops"][0]["dwell_min"], 9)
+
+    def test_leg_duration_uses_the_longer_drive(self):
+        back = [{"point": [49.15, 7.15], "dwell_min": 30}]
+        device = services.create_device(self.db, self._with_return([{"point": [49.1, 7.1], "dwell_min": 1}], back))
+        row = self._row(device["id"])
+        from core import scenarios
+        self.assertEqual(models.leg_duration(row), scenarios.leg_seconds(100.0, 1800))
+
+
 if __name__ == "__main__":
     unittest.main()

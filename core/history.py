@@ -39,8 +39,7 @@ class HistorySimulator:
         self.seed = seed
         self.realistic = bool(device["realistic"])
         self.max_speed = device["speed_kmh"]
-        self.route_duration = route["duration_s"]
-        self.stops_s = models.stops_seconds(route)
+        self.leg_s = models.leg_duration(route)    # expected duration of the longer drive
         self.rng = random.Random(f"history|{seed}")    # same input -> same history
         self.legs = {"forward": models.route_leg(route, "forward"), "return": models.route_leg(route, "return")}
         self.gps = GpsReceiver(self.realistic, self.rng)
@@ -66,7 +65,7 @@ class HistorySimulator:
         self.start_ts, self.end_ts = start.timestamp(), end.timestamp()
         self.t = self.obd_t = self.start_ts
         other = {"A": "B", "B": "A"}
-        leg_s = scenarios.leg_seconds(self.route_duration, self.stops_s)
+        leg_s = self.leg_s
         location, drive_now = scenarios.initial_position(self.cfg, start, leg_s, self.seed)
 
         while self.t < self.end_ts and not cancelled():

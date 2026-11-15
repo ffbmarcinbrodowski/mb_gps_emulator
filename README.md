@@ -187,8 +187,10 @@ and drives at the planned times until you click **Stop**.
 - **Direction:** every departure drives to the other end of the route (A → B, then B → A).
   A *round trip* always starts at A, waits at B and comes back.
 - **Return route:** B → A has its own route from GraphHopper, because one-way streets and
-  motorway exits differ. On the map it is the orange dashed line. It always goes straight back
-  to the start, without the stops.
+  motorway exits differ. On the map it is the orange dashed line. By default it goes straight back
+  to the start, without the stops. Through the API it can have its own stops (`return_stops`, e.g. a
+  school run that drops children off in another order in the afternoon); the UI keeps them when you
+  edit the device, but doesn't show or edit them yet.
 - **Parked:** between trips the vehicle stands with the ignition off and sends one record every
   5 minutes, like a parked Teltonika tracker. Events such as towing or power cut work while parked.
 - **Random ±:** shifts each departure by a few minutes, so the vehicle doesn't leave to the second.
@@ -424,8 +426,8 @@ section of variable-length values (VIN, fault codes).
 | GET, PUT, DELETE | `/api/servers/<id>` | Read / update / delete (optional `api_url`, `api_user`, `api_password`: Traccar API access) |
 | POST | `/api/servers/test-api` | `{api_url, api_user, api_password, server_id?}` → `{version}` if the Traccar login works |
 | POST | `/api/devices/<id>/traccar` | Create the device in Traccar through the server's API (or link the existing one) |
-| GET, POST | `/api/devices` | List (optional `?q=text`: search in name, IMEI, VIN, server) / create a device (route: `start`, `end`, optional `stops: [{point: [lat, lon], dwell_min: 5}, ...]`) |
-| GET, PUT, DELETE | `/api/devices/<id>` | Read (incl. route points) / update / delete |
+| GET, POST | `/api/devices` | List (optional `?q=text`: search in name, IMEI, VIN, server) / create a device (route: `start`, `end`, optional `stops: [{point: [lat, lon], dwell_min: 5}, ...]`, `return_stops` in the same format for B → A of a scenario) |
+| GET, PUT, DELETE | `/api/devices/<id>` | Read (incl. route points) / update / delete (PUT without `return_stops` keeps the stored ones, `[]` removes them) |
 | POST | `/api/routes` | `{start: [lat, lon], end: [lat, lon], via: [[lat, lon], ...]}` → route preview through the stops |
 | GET | `/api/routes/<id>` | Saved route |
 | POST | `/api/emulator/start` | `{device_id: 1}` or `{all: true}` |
